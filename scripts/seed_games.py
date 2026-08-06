@@ -33,7 +33,7 @@ it only matters for weeks that aren't running in "all games" mode.
 import argparse
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import requests
 
 CFBD_BASE = "https://api.collegefootballdata.com"
@@ -177,6 +177,63 @@ def build_games(year, week, api_key, include_all=False):
     return out
 
 
+def split_opening_batch(games, resolved_week, year, gap_hours=48, max_split_days=14):
+    """
+    CFBD sometimes hasn't split Week 0 from Week 1 yet this early in the
+    season -- both get tagged with the same week number, which is why the
+    "opening week" batch can come back way oversized (200+ games instead of
+    the ~65-70 a normal week has). This detects that: if there's a clear gap
+    of `gap_hours`+ between two clusters of kickoff times within the first
+    `max_split_days` days, the earlier cluster gets relabeled as Week 0
+    (kept in full) and the later cluster reverts to `resolved_week` with the
+    normal ranked/notable filter re-applied (since it's not really the
+    opening week once split out).
+
+    If no such gap is found, returns games unchanged -- this is a no-op for
+    a normal, already-correctly-split week.
+    """
+    dated = [g for g in games if g.get("kickoff")]
+    if len(dated) < 2:
+        return games
+
+    dated.sort(key=lambda g: g["kickoff"])
+    parsed = [datetime.fromisoformat(g["kickoff"].replace("Z", "+00:00")) for g in dated]
+
+    biggest_gap = timedelta(0)
+    split_idx = None
+    for i in range(len(parsed) - 1):
+        gap = parsed[i + 1] - parsed[i]
+        if gap > biggest_gap:
+            biggest_gap = gap
+            split_idx = i
+
+    if split_idx is None or biggest_gap < timedelta(hours=gap_hours):
+        return games  # no clear two-cluster split -- leave as-is
+    if parsed[split_idx] - parsed[0] > timedelta(days=max_split_days):
+        return games  # gap happens too late to plausibly be a week0/week1 seam
+
+    early_ids = {g["gameId"] for g in dated[: split_idx + 1]}
+    print(
+        f"Detected an unsplit opening batch: {len(early_ids)} games before a "
+        f"{biggest_gap} gap, {len(dated) - len(early_ids)} after. Splitting "
+        f"the earlier cluster into Week 0."
+    )
+
+    out = []
+    for g in games:
+        if g["gameId"] in early_ids:
+            g["week"] = 0
+            g["gameId"] = g["gameId"].replace(f"-wk{resolved_week}-", "-wk0-", 1)
+            out.append(g)
+        else:
+            g["week"] = resolved_week
+            # Re-apply the normal ranked/notable filter to the later cluster
+            # -- it's genuinely resolved_week now, not the opening week.
+            if g["apRankAway"] or g["apRankHome"] or g["notable"]:
+                out.append(g)
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--year", type=int, required=True)
@@ -206,6 +263,9 @@ def main():
         print(f"Week {week} is the season's opening week -- including all FBS games, not just ranked/notable.")
 
     games = build_games(args.year, week, cfbd_key, include_all=include_all)
+    if is_opening_week and not args.all_games:
+        games = split_opening_batch(games, week, args.year)
+
     if not games:
         print(f"No games found for {args.year} week {week}.")
         sys.exit(0)
