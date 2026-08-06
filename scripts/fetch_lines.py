@@ -25,10 +25,17 @@ Run manually:
     ODDS_API_KEY=xxx APP_URL=https://your-site.netlify.app INGEST_TOKEN=xxx \
     python scripts/fetch_lines.py
 
-Team-name matching: The Odds API and CFBD spell team names slightly
-differently sometimes (e.g. "Ohio State Buckeyes" vs "Ohio State"). This
-script does a loose match; check the printed "unmatched" list after each run
-and extend TEAM_ALIASES below if a game isn't lining up.
+Team-name matching: The Odds API returns full names with mascots (e.g.
+"Ohio State Buckeyes"), while CFBD -- and therefore your seeded games --
+use short school names (e.g. "Ohio State"). This script resolves that by
+longest-prefix matching each Odds API name against every team name already
+in your seeded games: "Ohio State Buckeyes" matches candidate "Ohio State"
+at a word boundary, and if two candidates could both match (e.g. "Miami"
+and "Miami (OH)" against "Miami (OH) RedHawks"), the longer/more specific
+one wins. No hardcoded alias list needed for the general case -- it self-
+resolves from whatever short names CFBD already gave your games. Add entries
+to TEAM_ALIASES below only for the rare case where prefix matching still
+doesn't line up.
 
 Bookmaker key: The Odds API's widget lists Hard Rock Bet separately per
 state ("Hard Rock Bet", "Hard Rock Bet (FL)", etc). Rather than hardcode a
@@ -49,14 +56,43 @@ ODDS_API_BASE = "https://api.the-odds-api.com/v4/sports/americanfootball_ncaaf/o
 # book in the response if this key isn't present for a given game.
 REFERENCE_BOOK_KEY = "draftkings"
 
-# Add entries here if team names don't match between The Odds API and CFBD.
+# Add entries here only if longest-prefix matching still doesn't resolve a
+# specific team correctly (e.g. Odds API uses a genuinely different school
+# name, not just school+mascot). Key is the Odds API's exact team string.
 TEAM_ALIASES = {
-    # "Ohio State Buckeyes": "Ohio State",
+    # "Ole Miss Rebels": "Ole Miss",
 }
 
 
-def normalize(name):
-    return TEAM_ALIASES.get(name, name).strip().lower()
+def build_team_resolver(known_games):
+    """
+    Builds a resolver that maps an Odds API team name (school + mascot) back
+    to whichever short school name CFBD used when the game was seeded, via
+    longest-prefix matching at a word boundary. Returns a function
+    resolve(odds_team_name) -> short_name or None.
+    """
+    candidates = set()
+    for g in known_games:
+        candidates.add(g["away"])
+        candidates.add(g["home"])
+    # Longest first, so "Miami (OH)" is tried before the shorter "Miami"
+    # when matching "Miami (OH) RedHawks" -- prevents the more specific
+    # school from being shadowed by a shorter, coincidentally-matching one.
+    candidates = sorted(candidates, key=len, reverse=True)
+
+    def resolve(odds_name):
+        if odds_name in TEAM_ALIASES:
+            return TEAM_ALIASES[odds_name]
+        name_lower = odds_name.strip().lower()
+        for cand in candidates:
+            cand_lower = cand.strip().lower()
+            if name_lower == cand_lower:
+                return cand
+            if name_lower.startswith(cand_lower + " ") or name_lower.startswith(cand_lower + "-"):
+                return cand
+        return None
+
+    return resolve
 
 
 def fetch_odds_api_games(api_key):
@@ -107,7 +143,8 @@ def main():
     games_resp = requests.get(f"{app_url}/api/games", timeout=30)
     games_resp.raise_for_status()
     known_games = games_resp.json().get("games", [])
-    lookup = {(normalize(g["away"]), normalize(g["home"])): g["gameId"] for g in known_games}
+    resolve_team = build_team_resolver(known_games)
+    lookup = {(g["away"].lower(), g["home"].lower()): g["gameId"] for g in known_games}
 
     events = fetch_odds_api_games(odds_api_key)
 
@@ -118,10 +155,13 @@ def main():
     printed_hardrock_match = False
 
     for ev in events:
-        away, home = ev.get("away_team"), ev.get("home_team")
-        game_id = lookup.get((normalize(away), normalize(home)))
+        away_raw, home_raw = ev.get("away_team"), ev.get("home_team")
+        away_short = resolve_team(away_raw) if away_raw else None
+        home_short = resolve_team(home_raw) if home_raw else None
+        home = home_raw  # outcome names in the odds payload use the full Odds API name
+        game_id = lookup.get((away_short.lower(), home_short.lower())) if away_short and home_short else None
         if not game_id:
-            unmatched.append(f"{away} @ {home}")
+            unmatched.append(f"{away_raw} @ {home_raw}")
             continue
 
         bookmakers = ev.get("bookmakers", [])
