@@ -1,0 +1,55 @@
+name: Update CFB lines
+
+on:
+  schedule:
+    # Line updates: every 3 hours, Mon-Sat (UTC). Adjust to taste -- lines
+    # move most Sun night/Mon (open) and Thu-Sat (close).
+    - cron: "0 */3 * * 1-6"
+    # Weekly seed: Monday 13:00 UTC (~9am ET), after the new AP poll and
+    # schedule are out. This is its own schedule entry specifically so the
+    # seed-games job below can identify it and only run then.
+    - cron: "0 13 * * 1"
+  workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab
+
+jobs:
+  seed-games:
+    # Runs only on the Monday cron above, or when triggered manually.
+    if: github.event.schedule == '0 13 * * 1' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r scripts/requirements.txt
+      - name: Seed this week's Top 25 + notable games
+        env:
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+          APP_URL: ${{ secrets.APP_URL }}
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+        # No --week flag: seed_games.py auto-detects the current week from
+        # CFBD's calendar. Pass --week explicitly if you ever need to backfill
+        # a specific week by hand.
+        run: python scripts/seed_games.py --year ${{ vars.SEASON_YEAR }}
+
+  fetch-lines:
+    # Depends on seed-games only in the sense that games need to exist for
+    # line-matching to work -- on non-Monday runs seed-games is skipped and
+    # this just runs against whatever games are already in the app.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r scripts/requirements.txt
+      - name: Fetch Hard Rock + reference lines
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          APP_URL: ${{ secrets.APP_URL }}
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+        run: python scripts/fetch_lines.py
+
+# NOTE: a manual "Run workflow" click (workflow_dispatch) runs BOTH jobs,
+# since fetch-lines has no schedule-matching condition on it. That's fine --
+# it just means a manual test run also reseeds the current week's games.
