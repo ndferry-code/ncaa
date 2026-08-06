@@ -60,6 +60,7 @@ jobs:
       - name: Fetch Hard Rock + reference lines
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
           APP_URL: ${{ secrets.APP_URL }}
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
         run: python scripts/fetch_lines.py
