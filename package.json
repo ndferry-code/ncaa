@@ -1,0 +1,12 @@
+{
+  "name": "cfb-betting-tracker",
+  "version": "1.0.0",
+  "description": "College football ATS betting tracker with Hard Rock Bet line movement and value tracking",
+  "private": true,
+  "scripts": {
+    "dev": "netlify dev"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.34.0"
+  }
+}

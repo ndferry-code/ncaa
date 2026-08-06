@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CFB ATS Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark">CFB</span>
+        <span class="brand-sub">ATS TRACKER · HARD ROCK BET FL</span>
+      </div>
+      <div class="week-select">
+        <label for="weekSelect">WEEK</label>
+        <select id="weekSelect"></select>
+      </div>
+    </div>
+  </header>
+
+  <section class="ticker" id="ticker" aria-label="Biggest line movers">
+    <div class="ticker-track" id="tickerTrack">Loading line movement…</div>
+  </section>
+
+  <main class="wrap">
+    <section class="scoreboard-row" id="recordCards"></section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>This Week's Slate</h2>
+        <span class="panel-note">Top 25 + notable matchups. Log your bet as soon as you place it.</span>
+      </div>
+      <div class="table-scroll">
+        <table id="gamesTable">
+          <thead>
+            <tr>
+              <th>Kickoff</th>
+              <th>Matchup</th>
+              <th>Hard Rock Line</th>
+              <th>Reference Line</th>
+              <th>Edge</th>
+              <th>Your Bet</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody id="gamesBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Line Movement</h2>
+        <span class="panel-note">Open → current, sorted by biggest move first.</span>
+      </div>
+      <div class="table-scroll">
+        <table id="movementTable">
+          <thead>
+            <tr>
+              <th>Matchup</th>
+              <th>Open</th>
+              <th>Current</th>
+              <th>Move</th>
+              <th>Trend</th>
+            </tr>
+          </thead>
+          <tbody id="movementBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Season Trends</h2>
+        <span class="panel-note">Auto-generated from your settled bets.</span>
+      </div>
+      <div class="insights-grid" id="insightsGrid"></div>
+    </section>
+  </main>
+
+  <dialog id="betDialog">
+    <form id="betForm" method="dialog">
+      <h3 id="betDialogTitle">Log Bet</h3>
+      <input type="hidden" id="betGameId" />
+      <label>Side
+        <input type="text" id="betSide" placeholder="e.g. Ohio State -6.5" required />
+      </label>
+      <div class="form-row">
+        <label>Spread
+          <input type="number" step="0.5" id="betSpread" required />
+        </label>
+        <label>Odds
+          <input type="number" step="1" id="betOdds" value="-110" required />
+        </label>
+        <label>Stake
+          <input type="number" step="1" id="betStake" value="100" required />
+        </label>
+      </div>
+      <label>Notes
+        <textarea id="betNotes" rows="2" placeholder="Why you made this bet"></textarea>
+      </label>
+      <div class="form-actions">
+        <button type="button" id="betCancel" class="btn-ghost">Cancel</button>
+        <button type="submit" id="betSave" class="btn-primary">Save Bet</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
