@@ -6,15 +6,23 @@ Hard Rock's number against the wider market, and surfaces trends from your
 settled bets as the season goes on.
 
 Same stack pattern as your other pool apps: **Netlify Functions + Upstash
-Redis** for the app, **GitHub Actions** for the scheduled scraping.
+Redis** for the app, **GitHub Actions** for scheduled updates.
+
+**Lines come from The Odds API, not from scraping Hard Rock directly.** The
+Odds API already lists Hard Rock Bet as a bookmaker, so one API call gets you
+both Hard Rock's actual line and a reference market line (DraftKings by
+default) for value comparison — fully automated, no login, no geofencing
+issues. Regulated sportsbooks use location-verification services that block
+cloud servers outside their licensed state, so scraping the app/site directly
+from GitHub Actions would likely have been unreliable at best.
 
 ## What's here
 
 ```
 public/                  Frontend (plain HTML/JS, no build step)
 netlify/functions/       Serverless API (games, bets, line ingest, dashboard)
-scripts/                 Python: seed weekly games, scrape Hard Rock, pull reference odds
-.github/workflows/       Scheduled scraper + seeder
+scripts/                 Python: seed weekly games, fetch lines
+.github/workflows/       Scheduled updater + seeder
 ```
 
 ## 1. Set up Upstash Redis
@@ -31,7 +39,7 @@ is plenty for a season of CFB data), grab the REST URL and REST token.
    - `UPSTASH_REDIS_REST_URL`
    - `UPSTASH_REDIS_REST_TOKEN`
    - `INGEST_TOKEN` — make up any random string, this is the shared secret
-     your scrapers use to write data (keeps randos off the internet from
+     the update script uses to write data (keeps randos off the internet from
      posting fake lines to your public API endpoints).
 4. Deploy. Your site URL (e.g. `https://cfb-tracker-nick.netlify.app`) is
    what you'll use as `APP_URL` everywhere below.
@@ -41,8 +49,9 @@ is plenty for a season of CFB data), grab the REST URL and REST token.
 - **CollegeFootballData.com** — free key at collegefootballdata.com/key.
   Used once a week to pull the AP Top 25 and that week's schedule.
 - **The Odds API** — free key at the-odds-api.com (500 credits/month free
-  tier; this app uses ~1 credit per scheduled run). Used for the "reference"
-  line you're comparing Hard Rock against.
+  tier; this app uses ~2 credits per scheduled run, since it queries both the
+  `us` and `us2` regions to cover Hard Rock and the reference book together).
+  Used for both the Hard Rock line and the reference line.
 
 ## 4. Wire up GitHub Actions
 
@@ -57,32 +66,23 @@ In your repo's Settings → Secrets and variables → Actions:
 **Variables:**
 - `SEASON_YEAR` — e.g. `2026`
 
-The workflow (`.github/workflows/scrape-lines.yml`) scrapes lines every 3
+The workflow (`.github/workflows/update-lines.yml`) fetches lines every 3
 hours Mon–Sat, and reseeds the week's Top 25 + notable games every Monday.
-The current week is auto-detected from CFBD's `/calendar` endpoint (see
-`get_current_week()` in `seed_games.py`) — nothing to update by hand.
-Adjust the cron schedules to match how often you actually want snapshots —
-more often near kickoff if you want tighter CLV tracking.
+The current week is auto-detected from CFBD's `/calendar` endpoint — nothing
+to update by hand. Adjust the cron schedules to match how often you actually
+want snapshots — more often near kickoff if you want tighter CLV tracking.
 
-## 5. Finish the Hard Rock scraper — the one manual step
+## 5. Sanity-check the Hard Rock match
 
-I couldn't reach hardrockbet.com from where this was built, so
-`scripts/scrape_hardrock.py` ships with a **network-capture scraper
-skeleton**, not verified selectors. It's set up to do this the reliable way
-(read the JSON their app already fetches, rather than scrape brittle HTML),
-but you need to point it at the real endpoint once:
+The first time `fetch_lines.py` runs, it prints which bookmaker it matched as
+"Hard Rock" (e.g. `key='hardrockbet' title='Hard Rock Bet (FL)'`). Check that
+log line once — The Odds API lists Hard Rock separately per state, and the
+script picks whichever entry has "FL" in the title, preferring that over a
+generic "Hard Rock Bet" entry if both appear. If it ever matches the wrong
+one, adjust `find_hardrock_book()` in `scripts/fetch_lines.py`.
 
-1. Run locally: `HEADLESS=false python scripts/scrape_hardrock.py`
-   (opens a real browser window) — or just open Hard Rock Bet's CFB page in
-   Chrome yourself with DevTools → Network → Fetch/XHR open.
-2. Find the request that returns spread data as JSON.
-3. Update `ODDS_JSON_URL_PATTERN` and `parse_odds_payload()` in that file to
-   match what you see.
-4. If there's no clean JSON endpoint, fall back to DOM scraping — there's a
-   `scrape_via_dom()` function with a `SELECTORS` dict ready for you to fill
-   in from the real page markup.
-
-Full instructions are in the docstring at the top of that file.
+Trigger a manual run from the Actions tab (`workflow_dispatch`) to see this
+without waiting for the next scheduled run.
 
 ## 6. Seed your first week of games
 
@@ -100,6 +100,34 @@ got a "current" week yet.)
 Add any unranked-but-notable games by hand in `NOTABLE_GAMES` at the top of
 `seed_games.py` before running — that's your weekly editorial call on what
 counts as "notable."
+
+Then pull lines for those games:
+
+```
+ODDS_API_KEY=xxx APP_URL=https://your-site.netlify.app INGEST_TOKEN=xxx \
+python scripts/fetch_lines.py
+```
+
+### Starting early, before the season (e.g. seeding Week 0)
+
+Week 0 is handled specially: instead of filtering to ranked/notable games,
+the script includes **every FBS game** that week, since the Week 0 slate is
+small. This kicks in automatically whenever the resolved week is the
+earliest one on CFBD's calendar — nothing to flag. (`--all-games` is there
+if you ever want that same behavior for a different week on demand.)
+
+One thing to know if you're doing this a couple weeks out: **the AP
+preseason poll usually isn't out yet.** That's fine for Week 0 itself since
+it tracks everything regardless of rank — but it does mean games will show
+up with no rank badge until the poll drops. Once it's out, just re-run the
+seed and ranks backfill onto whatever's still on the board.
+
+**Week 1 takes over automatically once Week 0 wraps.** You don't need to do
+anything: the Monday cron in the workflow re-runs `seed_games.py` with no
+`--week` flag, which asks CFBD's calendar what "now" falls into, and Week 1
+is no longer the opening week so it goes back to ranked/notable filtering.
+Week 0's bets and lines stay in the app — the week dropdown on the dashboard
+still shows them, they're just no longer the default view.
 
 ## 7. Use it
 
@@ -121,7 +149,11 @@ API already supports it.
   place to extend.
 - **CLV requires a closing line.** Right now that means noting the last
   Hard Rock snapshot before kickoff and setting it as `closingLine` when you
-  settle a bet — could automate by having the scraper flag the last
+  settle a bet — could automate by having the update script flag the last
   pre-kickoff snapshot per game.
 - **Redis history is capped at 200 snapshots/game** to keep storage in
   check — plenty for a single game week at a few-hour cadence.
+- **If Hard Rock ever disappears from The Odds API response** (bookmakers do
+  briefly drop out during maintenance, per their docs), that run's Hard Rock
+  push is just skipped — you won't get a bad snapshot, just a gap in that
+  game's history until the next run picks it back up.
