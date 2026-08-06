@@ -135,13 +135,22 @@ def spread_for_home(market, home_team):
     return outcome
 
 
+def check_response(resp):
+    """Like resp.raise_for_status(), but prints the response body first --
+    our own API functions return {"error": "...", "stack": "..."} on failure,
+    which is far more useful in the Action log than a bare status line."""
+    if not resp.ok:
+        print(f"Request to {resp.url} failed ({resp.status_code}): {resp.text}")
+    resp.raise_for_status()
+
+
 def main():
     odds_api_key = os.environ["ODDS_API_KEY"]
     app_url = os.environ["APP_URL"].rstrip("/")
     ingest_token = os.environ.get("INGEST_TOKEN", "")
 
     games_resp = requests.get(f"{app_url}/api/games", timeout=30)
-    games_resp.raise_for_status()
+    check_response(games_resp)
     known_games = games_resp.json().get("games", [])
     resolve_team = build_team_resolver(known_games)
     lookup = {(g["away"].lower(), g["home"].lower()): g["gameId"] for g in known_games}
@@ -201,7 +210,7 @@ def main():
             headers={"x-ingest-token": ingest_token, "Content-Type": "application/json"},
             timeout=30,
         )
-        resp.raise_for_status()
+        check_response(resp)
         print(f"Pushed {len(hardrock_snapshots)} Hard Rock lines: {resp.json()}")
     else:
         print("No Hard Rock lines found in this response -- Hard Rock may be temporarily unlisted, or check the bookmaker title match above.")
@@ -213,7 +222,7 @@ def main():
             headers={"x-ingest-token": ingest_token, "Content-Type": "application/json"},
             timeout=30,
         )
-        resp.raise_for_status()
+        check_response(resp)
         print(f"Pushed {len(reference_snapshots)} reference lines: {resp.json()}")
 
     if unmatched:

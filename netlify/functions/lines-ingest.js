@@ -22,28 +22,32 @@ exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return json(405, { error: "method not allowed" });
   if (!requireAuth(event)) return json(401, { error: "unauthorized" });
 
-  const redis = getRedis();
-  const body = JSON.parse(event.body || "{}");
-  const source = body.source === "reference" ? "reference" : "hardrock";
-  const book = body.book || (source === "hardrock" ? "hardrock" : "unknown");
-  const snapshots = Array.isArray(body.snapshots) ? body.snapshots : [];
+  try {
+    const redis = getRedis();
+    const body = JSON.parse(event.body || "{}");
+    const source = body.source === "reference" ? "reference" : "hardrock";
+    const book = body.book || (source === "hardrock" ? "hardrock" : "unknown");
+    const snapshots = Array.isArray(body.snapshots) ? body.snapshots : [];
 
-  let written = 0;
-  for (const snap of snapshots) {
-    if (!snap.gameId || typeof snap.spread !== "number") continue;
-    const record = {
-      spread: snap.spread,
-      odds: snap.odds ?? null,
-      book,
-      ts: snap.ts || new Date().toISOString(),
-    };
-    const latestKey = `lines:${source}:${snap.gameId}:latest`;
-    const historyKey = `lines:${source}:${snap.gameId}:history`;
-    await redis.set(latestKey, record);
-    await redis.rpush(historyKey, record);
-    await redis.ltrim(historyKey, -MAX_HISTORY, -1);
-    written += 1;
+    let written = 0;
+    for (const snap of snapshots) {
+      if (!snap.gameId || typeof snap.spread !== "number") continue;
+      const record = {
+        spread: snap.spread,
+        odds: snap.odds ?? null,
+        book,
+        ts: snap.ts || new Date().toISOString(),
+      };
+      const latestKey = `lines:${source}:${snap.gameId}:latest`;
+      const historyKey = `lines:${source}:${snap.gameId}:history`;
+      await redis.set(latestKey, record);
+      await redis.rpush(historyKey, record);
+      await redis.ltrim(historyKey, -MAX_HISTORY, -1);
+      written += 1;
+    }
+
+    return json(200, { written, source, book });
+  } catch (err) {
+    return json(500, { error: err.message, stack: err.stack });
   }
-
-  return json(200, { written, source, book });
 };

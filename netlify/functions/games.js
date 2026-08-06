@@ -20,67 +20,74 @@ const { getRedis, json, requireAuth } = require("./_redis");
 exports.handler = async (event) => {
   const redis = getRedis();
 
-  if (event.httpMethod === "GET") {
-    const week = event.queryStringParameters && event.queryStringParameters.week;
-    let gameIds;
-    if (week) {
-      gameIds = await redis.smembers(`week:${week}:games`);
-    } else {
-      const weeks = await redis.smembers("season:weeks");
-      const sets = await Promise.all(weeks.map((w) => redis.smembers(`week:${w}:games`)));
-      gameIds = [...new Set(sets.flat())];
+  try {
+    if (event.httpMethod === "GET") {
+      const week = event.queryStringParameters && event.queryStringParameters.week;
+      let gameIds;
+      if (week) {
+        gameIds = await redis.smembers(`week:${week}:games`);
+      } else {
+        const weeks = await redis.smembers("season:weeks");
+        const sets = await Promise.all(weeks.map((w) => redis.smembers(`week:${w}:games`)));
+        gameIds = [...new Set(sets.flat())];
+      }
+      if (gameIds.length === 0) return json(200, { games: [] });
+      const games = await redis.mget(...gameIds.map((id) => `game:${id}`));
+      return json(200, { games: games.filter(Boolean) });
     }
-    if (gameIds.length === 0) return json(200, { games: [] });
-    const games = await redis.mget(...gameIds.map((id) => `game:${id}`));
-    return json(200, { games: games.filter(Boolean) });
-  }
 
-  if (event.httpMethod === "POST") {
-    if (!requireAuth(event)) return json(401, { error: "unauthorized" });
-    const body = JSON.parse(event.body || "{}");
-    const games = Array.isArray(body.games) ? body.games : [body];
+    if (event.httpMethod === "POST") {
+      if (!requireAuth(event)) return json(401, { error: "unauthorized" });
+      const body = JSON.parse(event.body || "{}");
+      const games = Array.isArray(body.games) ? body.games : [body];
 
-    // Week 0 is a valid week number, but `0` is falsy in JS -- a naive
-    // `!g.week` check silently drops every single Week 0 game. Check for
-    // presence explicitly instead.
-    const valid = games.filter((g) => g.gameId && g.week !== undefined && g.week !== null);
+      // Week 0 is a valid week number, but `0` is falsy in JS -- a naive
+      // `!g.week` check silently drops every single Week 0 game. Check for
+      // presence explicitly instead.
+      const valid = games.filter((g) => g.gameId && g.week !== undefined && g.week !== null);
 
-    if (body.replace) {
-      // Full replace per week: re-seeding a week should make Redis match
-      // exactly what was just sent, not accumulate stale entries forever
-      // (e.g. a game that no longer qualifies once rankings update).
-      const weeksInPayload = [...new Set(valid.map((g) => g.week))];
-      for (const w of weeksInPayload) {
-        const newIdsForWeek = valid.filter((g) => g.week === w).map((g) => g.gameId);
-        const existingIds = await redis.smembers(`week:${w}:games`);
-        const staleIds = existingIds.filter((id) => !newIdsForWeek.includes(id));
-        if (staleIds.length) {
-          await redis.srem(`week:${w}:games`, ...staleIds);
-          await redis.del(...staleIds.map((id) => `game:${id}`));
+      if (body.replace) {
+        // Full replace per week: re-seeding a week should make Redis match
+        // exactly what was just sent, not accumulate stale entries forever
+        // (e.g. a game that no longer qualifies once rankings update).
+        const weeksInPayload = [...new Set(valid.map((g) => g.week))];
+        for (const w of weeksInPayload) {
+          const newIdsForWeek = valid.filter((g) => g.week === w).map((g) => g.gameId);
+          const existingIds = await redis.smembers(`week:${w}:games`);
+          const staleIds = existingIds.filter((id) => !newIdsForWeek.includes(id));
+          if (staleIds.length) {
+            await redis.srem(`week:${w}:games`, ...staleIds);
+            await redis.del(...staleIds.map((id) => `game:${id}`));
+          }
         }
       }
+
+      for (const g of valid) {
+        await redis.set(`game:${g.gameId}`, g);
+        await redis.sadd(`week:${g.week}:games`, g.gameId);
+        await redis.sadd("season:weeks", String(g.week));
+      }
+      return json(200, { saved: valid.length, removed: games.length - valid.length });
     }
 
-    for (const g of valid) {
-      await redis.set(`game:${g.gameId}`, g);
-      await redis.sadd(`week:${g.week}:games`, g.gameId);
-      await redis.sadd("season:weeks", String(g.week));
+    if (event.httpMethod === "DELETE") {
+      if (!requireAuth(event)) return json(401, { error: "unauthorized" });
+      const week = event.queryStringParameters && event.queryStringParameters.week;
+      if (week === undefined || week === null) return json(400, { error: "week query param required" });
+      const ids = await redis.smembers(`week:${week}:games`);
+      if (ids.length) {
+        await redis.del(...ids.map((id) => `game:${id}`));
+        await redis.del(`week:${week}:games`);
+      }
+      await redis.srem("season:weeks", String(week));
+      return json(200, { deletedWeek: week, removedGames: ids.length });
     }
-    return json(200, { saved: valid.length, removed: games.length - valid.length });
+
+    return json(405, { error: "method not allowed" });
+  } catch (err) {
+    // Surface the real error instead of a bare 500 -- callers (curl, the
+    // Python scripts) print the response body on failure, so this shows up
+    // directly instead of requiring a trip to the Netlify function logs.
+    return json(500, { error: err.message, stack: err.stack });
   }
-
-  if (event.httpMethod === "DELETE") {
-    if (!requireAuth(event)) return json(401, { error: "unauthorized" });
-    const week = event.queryStringParameters && event.queryStringParameters.week;
-    if (week === undefined || week === null) return json(400, { error: "week query param required" });
-    const ids = await redis.smembers(`week:${week}:games`);
-    if (ids.length) {
-      await redis.del(...ids.map((id) => `game:${id}`));
-      await redis.del(`week:${week}:games`);
-    }
-    await redis.srem("season:weeks", String(week));
-    return json(200, { deletedWeek: week, removedGames: ids.length });
-  }
-
-  return json(405, { error: "method not allowed" });
 };

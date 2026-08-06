@@ -143,10 +143,13 @@ function renderGamesTable() {
 function renderMovementTable() {
   const body = document.getElementById("movementBody");
   const rows = [...state.lineMovement]
-    .filter((m) => m.hardrock.current != null)
-    .sort((a, b) => Math.abs(b.hardrock.deltaPts || 0) - Math.abs(a.hardrock.deltaPts || 0));
+    // Only real movers: must have an actual delta, and 0.0 pts doesn't
+    // count as movement even if it technically has open/current values.
+    .filter((m) => m.hardrock.deltaPts != null && m.hardrock.deltaPts !== 0)
+    .sort((a, b) => Math.abs(b.hardrock.deltaPts) - Math.abs(a.hardrock.deltaPts))
+    .slice(0, 10);
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="5" class="mono" style="color:var(--muted)">No line history yet.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="5" class="mono" style="color:var(--muted)">No line movement yet.</td></tr>`;
     return;
   }
   body.innerHTML = rows

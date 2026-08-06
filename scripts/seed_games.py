@@ -1,6 +1,8 @@
 """
-Seeds this week's game list into the tracker: every Top 25 matchup, plus a
-hand-maintained list of "notable" unranked games you want to include.
+Seeds this week's game list into the tracker: every Top 25 matchup.
+
+(Notable-but-unranked matchups are disabled for now -- see NOTABLE_GAMES
+below if you want to turn that back on later.)
 
 Data source: collegefootballdata.com (free tier, 1000 calls/month, plenty for
 weekly use). Get a key at https://collegefootballdata.com/key and set it as
@@ -24,8 +26,8 @@ which made the "opening week" auto-detection unreliable). If you want a
 specific week to include every game regardless of rank, pass --all-games
 explicitly for that one run.
 
-NOTABLE_GAMES below is yours to edit each week for the non-ranked matchups
-you want tracked (rivalry games, primetime games, whatever catches your eye).
+NOTABLE_GAMES currently has no effect on filtering (see build_games()) --
+kept defined in case you want to re-enable it later.
 """
 
 import argparse
@@ -157,8 +159,10 @@ def build_games(year, week, api_key, include_all=False):
             continue
         away_rank = ap_ranks.get(away)
         home_rank = ap_ranks.get(home)
-        is_notable = (away, home) in NOTABLE_GAMES or (home, away) in NOTABLE_GAMES
-        if not include_all and not (away_rank or home_rank or is_notable):
+        # Notable-matchup inclusion is disabled for now -- ranked only.
+        # NOTABLE_GAMES stays defined above so this is a one-line flip back
+        # on (`or is_notable` in both conditions below) if you want it later.
+        if not include_all and not (away_rank or home_rank):
             continue
         game_id = f"{year}-wk{week}-{slugify(away)}-{slugify(home)}"
         out.append(
@@ -170,10 +174,19 @@ def build_games(year, week, api_key, include_all=False):
                 "home": home,
                 "apRankAway": away_rank,
                 "apRankHome": home_rank,
-                "notable": is_notable and not (away_rank or home_rank),
+                "notable": False,
             }
         )
     return out
+
+
+def check_response(resp):
+    """Like resp.raise_for_status(), but prints the response body first --
+    our own API functions return {"error": "...", "stack": "..."} on failure,
+    which is far more useful in the Action log than a bare status line."""
+    if not resp.ok:
+        print(f"Request to {resp.url} failed ({resp.status_code}): {resp.text}")
+    resp.raise_for_status()
 
 
 def main():
@@ -209,7 +222,7 @@ def main():
         headers={"x-ingest-token": ingest_token, "Content-Type": "application/json"},
         timeout=30,
     )
-    resp.raise_for_status()
+    check_response(resp)
     print(f"Seeded {len(games)} games for week {week}: {resp.json()}")
 
 

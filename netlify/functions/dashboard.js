@@ -54,67 +54,71 @@ exports.handler = async (event) => {
   const redis = getRedis();
   const week = event.queryStringParameters && event.queryStringParameters.week;
 
-  let gameIds;
-  if (week) {
-    gameIds = await redis.smembers(`week:${week}:games`);
-  } else {
-    const weeks = await redis.smembers("season:weeks");
-    const sets = await Promise.all(weeks.map((w) => redis.smembers(`week:${w}:games`)));
-    gameIds = [...new Set(sets.flat())];
-  }
-
-  const games = gameIds.length ? (await redis.mget(...gameIds.map((id) => `game:${id}`))).filter(Boolean) : [];
-
-  const allBetIds = await redis.smembers("bets:all");
-  const allBets = allBetIds.length ? (await redis.mget(...allBetIds.map((id) => `bet:${id}`))).filter(Boolean) : [];
-  const bets = week ? allBets.filter((b) => gameIds.includes(b.gameId)) : allBets;
-
-  const lineMovement = [];
-  const valueComparison = [];
-
-  for (const g of games) {
-    const [hrLatest, hrHistory, refLatest, refHistory] = await Promise.all([
-      redis.get(`lines:hardrock:${g.gameId}:latest`),
-      redis.lrange(`lines:hardrock:${g.gameId}:history`, 0, -1),
-      redis.get(`lines:reference:${g.gameId}:latest`),
-      redis.lrange(`lines:reference:${g.gameId}:history`, 0, -1),
-    ]);
-
-    const hrOpen = hrHistory && hrHistory.length ? hrHistory[0].spread : null;
-    const hrCurrent = hrLatest ? hrLatest.spread : null;
-    const hrDelta = hrOpen != null && hrCurrent != null ? Math.round((hrCurrent - hrOpen) * 10) / 10 : null;
-
-    lineMovement.push({
-      gameId: g.gameId,
-      hardrock: { open: hrOpen, current: hrCurrent, deltaPts: hrDelta, history: hrHistory || [] },
-      reference: {
-        open: refHistory && refHistory.length ? refHistory[0].spread : null,
-        current: refLatest ? refLatest.spread : null,
-        book: refLatest ? refLatest.book : null,
-        history: refHistory || [],
-      },
-    });
-
-    if (hrCurrent != null && refLatest && typeof refLatest.spread === "number") {
-      const edge = Math.round((hrCurrent - refLatest.spread) * 10) / 10;
-      valueComparison.push({
-        gameId: g.gameId,
-        hardrockSpread: hrCurrent,
-        referenceSpread: refLatest.spread,
-        referenceBook: refLatest.book,
-        edgePts: edge, // positive = hardrock number is higher (more points to the team getting points)
-      });
+  try {
+    let gameIds;
+    if (week) {
+      gameIds = await redis.smembers(`week:${week}:games`);
+    } else {
+      const weeks = await redis.smembers("season:weeks");
+      const sets = await Promise.all(weeks.map((w) => redis.smembers(`week:${w}:games`)));
+      gameIds = [...new Set(sets.flat())];
     }
+
+    const games = gameIds.length ? (await redis.mget(...gameIds.map((id) => `game:${id}`))).filter(Boolean) : [];
+
+    const allBetIds = await redis.smembers("bets:all");
+    const allBets = allBetIds.length ? (await redis.mget(...allBetIds.map((id) => `bet:${id}`))).filter(Boolean) : [];
+    const bets = week ? allBets.filter((b) => gameIds.includes(b.gameId)) : allBets;
+
+    const lineMovement = [];
+    const valueComparison = [];
+
+    for (const g of games) {
+      const [hrLatest, hrHistory, refLatest, refHistory] = await Promise.all([
+        redis.get(`lines:hardrock:${g.gameId}:latest`),
+        redis.lrange(`lines:hardrock:${g.gameId}:history`, 0, -1),
+        redis.get(`lines:reference:${g.gameId}:latest`),
+        redis.lrange(`lines:reference:${g.gameId}:history`, 0, -1),
+      ]);
+
+      const hrOpen = hrHistory && hrHistory.length ? hrHistory[0].spread : null;
+      const hrCurrent = hrLatest ? hrLatest.spread : null;
+      const hrDelta = hrOpen != null && hrCurrent != null ? Math.round((hrCurrent - hrOpen) * 10) / 10 : null;
+
+      lineMovement.push({
+        gameId: g.gameId,
+        hardrock: { open: hrOpen, current: hrCurrent, deltaPts: hrDelta, history: hrHistory || [] },
+        reference: {
+          open: refHistory && refHistory.length ? refHistory[0].spread : null,
+          current: refLatest ? refLatest.spread : null,
+          book: refLatest ? refLatest.book : null,
+          history: refHistory || [],
+        },
+      });
+
+      if (hrCurrent != null && refLatest && typeof refLatest.spread === "number") {
+        const edge = Math.round((hrCurrent - refLatest.spread) * 10) / 10;
+        valueComparison.push({
+          gameId: g.gameId,
+          hardrockSpread: hrCurrent,
+          referenceSpread: refLatest.spread,
+          referenceBook: refLatest.book,
+          edgePts: edge, // positive = hardrock number is higher (more points to the team getting points)
+        });
+      }
+    }
+
+    // Flag the biggest movers (top 3 by absolute point movement)
+    const sortedByMovement = [...lineMovement]
+      .filter((m) => m.hardrock.deltaPts != null)
+      .sort((a, b) => Math.abs(b.hardrock.deltaPts) - Math.abs(a.hardrock.deltaPts));
+    const biggestMoverIds = new Set(sortedByMovement.slice(0, 3).map((m) => m.gameId));
+    lineMovement.forEach((m) => (m.biggestMover = biggestMoverIds.has(m.gameId)));
+
+    const record = computeRecord(allBets);
+
+    return json(200, { games, bets, lineMovement, valueComparison, record });
+  } catch (err) {
+    return json(500, { error: err.message, stack: err.stack });
   }
-
-  // Flag the biggest movers (top 3 by absolute point movement)
-  const sortedByMovement = [...lineMovement]
-    .filter((m) => m.hardrock.deltaPts != null)
-    .sort((a, b) => Math.abs(b.hardrock.deltaPts) - Math.abs(a.hardrock.deltaPts));
-  const biggestMoverIds = new Set(sortedByMovement.slice(0, 3).map((m) => m.gameId));
-  lineMovement.forEach((m) => (m.biggestMover = biggestMoverIds.has(m.gameId)));
-
-  const record = computeRecord(allBets);
-
-  return json(200, { games, bets, lineMovement, valueComparison, record });
 };
