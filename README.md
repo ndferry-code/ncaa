@@ -56,12 +56,13 @@ In your repo's Settings → Secrets and variables → Actions:
 
 **Variables:**
 - `SEASON_YEAR` — e.g. `2026`
-- `CURRENT_WEEK` — bump this by hand each week (simplest option), or wire up
-  a date-based calculation later if you want it fully hands-off
 
 The workflow (`.github/workflows/scrape-lines.yml`) scrapes lines every 3
-hours Mon–Sat. Adjust the cron schedule to match how often you actually want
-snapshots — more often near kickoff if you want tighter CLV tracking.
+hours Mon–Sat, and reseeds the week's Top 25 + notable games every Monday.
+The current week is auto-detected from CFBD's `/calendar` endpoint (see
+`get_current_week()` in `seed_games.py`) — nothing to update by hand.
+Adjust the cron schedules to match how often you actually want snapshots —
+more often near kickoff if you want tighter CLV tracking.
 
 ## 5. Finish the Hard Rock scraper — the one manual step
 
@@ -89,8 +90,12 @@ Once secrets are set:
 
 ```
 CFBD_API_KEY=xxx APP_URL=https://your-site.netlify.app INGEST_TOKEN=xxx \
-python scripts/seed_games.py --year 2026 --week 1
+python scripts/seed_games.py --year 2026
 ```
+
+(Omitting `--week` auto-detects the current week; pass `--week 1` explicitly
+if you're backfilling before the season's underway and the calendar hasn't
+got a "current" week yet.)
 
 Add any unranked-but-notable games by hand in `NOTABLE_GAMES` at the top of
 `seed_games.py` before running — that's your weekly editorial call on what

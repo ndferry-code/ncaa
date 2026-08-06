@@ -10,9 +10,11 @@ Run manually:
     CFBD_API_KEY=xxx APP_URL=https://your-site.netlify.app INGEST_TOKEN=xxx \
     python scripts/seed_games.py --year 2026 --week 3
 
-Or let the GitHub Actions workflow (.github/workflows/scrape-lines.yml) run it
-on a schedule -- it calls this once per week, early Sunday/Monday when the new
-AP poll and schedule are out.
+--week is optional. If you omit it, the script asks CFBD's /calendar endpoint
+for the season's week date ranges and picks whichever week we're currently
+inside (falling back to the most recently *started* week once ranges end,
+e.g. during a Sunday/Monday gap between weeks). That's what the GitHub
+Actions workflow does every Monday -- no CURRENT_WEEK variable to maintain.
 
 NOTABLE_GAMES below is yours to edit each week for the non-ranked matchups you
 want tracked (rivalry games, primetime games, whatever catches your eye).
@@ -21,6 +23,7 @@ want tracked (rivalry games, primetime games, whatever catches your eye).
 import argparse
 import os
 import sys
+from datetime import datetime, timezone
 import requests
 
 CFBD_BASE = "https://api.collegefootballdata.com"
@@ -45,6 +48,51 @@ def cfbd_get(path, params, api_key):
 
 def slugify(s):
     return "".join(c.lower() if c.isalnum() else "-" for c in s).strip("-")
+
+
+def get_current_week(year, api_key):
+    """
+    Figures out the current CFB week from CFBD's /calendar endpoint instead
+    of a hand-maintained variable. Returns a regular-season week number, or
+    raises if the calendar can't be parsed -- caller should fall back to
+    requiring --week explicitly if that happens.
+    """
+    calendar = cfbd_get("/calendar", {"year": year}, api_key)
+    now = datetime.now(timezone.utc)
+
+    weeks = []
+    for entry in calendar:
+        if entry.get("seasonType") not in ("regular", None):
+            continue
+        start = entry.get("firstGameStart") or entry.get("first_game_start")
+        end = entry.get("lastGameStart") or entry.get("last_game_start")
+        week_num = entry.get("week")
+        if not (start and week_num is not None):
+            continue
+        weeks.append(
+            {
+                "week": week_num,
+                "start": datetime.fromisoformat(start.replace("Z", "+00:00")),
+                "end": datetime.fromisoformat(end.replace("Z", "+00:00")) if end else None,
+            }
+        )
+    weeks.sort(key=lambda w: w["start"])
+
+    if not weeks:
+        raise ValueError("CFBD /calendar returned no usable regular-season weeks")
+
+    # Currently inside a week's game window
+    for w in weeks:
+        if w["start"] <= now <= (w["end"] or w["start"]):
+            return w["week"]
+
+    # Between weeks (e.g. Sun/Mon) -- use the most recent week that's started
+    started = [w for w in weeks if w["start"] <= now]
+    if started:
+        return started[-1]["week"]
+
+    # Season hasn't started yet -- default to week 1
+    return weeks[0]["week"]
 
 
 def build_games(year, week, api_key):
@@ -93,16 +141,21 @@ def build_games(year, week, api_key):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--year", type=int, required=True)
-    parser.add_argument("--week", type=int, required=True)
+    parser.add_argument("--week", type=int, default=None, help="Omit to auto-detect from CFBD's calendar")
     args = parser.parse_args()
 
     cfbd_key = os.environ["CFBD_API_KEY"]
     app_url = os.environ["APP_URL"].rstrip("/")
     ingest_token = os.environ.get("INGEST_TOKEN", "")
 
-    games = build_games(args.year, args.week, cfbd_key)
+    week = args.week
+    if week is None:
+        week = get_current_week(args.year, cfbd_key)
+        print(f"Auto-detected current week: {week}")
+
+    games = build_games(args.year, week, cfbd_key)
     if not games:
-        print(f"No ranked/notable games found for {args.year} week {args.week}")
+        print(f"No ranked/notable games found for {args.year} week {week}")
         sys.exit(0)
 
     resp = requests.post(
@@ -112,7 +165,7 @@ def main():
         timeout=30,
     )
     resp.raise_for_status()
-    print(f"Seeded {len(games)} games for week {args.week}: {resp.json()}")
+    print(f"Seeded {len(games)} games for week {week}: {resp.json()}")
 
 
 if __name__ == "__main__":
