@@ -27,15 +27,23 @@ Run manually:
 
 Team-name matching: The Odds API returns full names with mascots (e.g.
 "Ohio State Buckeyes"), while CFBD -- and therefore your seeded games --
-use short school names (e.g. "Ohio State"). This script resolves that by
-longest-prefix matching each Odds API name against every team name already
-in your seeded games: "Ohio State Buckeyes" matches candidate "Ohio State"
-at a word boundary, and if two candidates could both match (e.g. "Miami"
-and "Miami (OH)" against "Miami (OH) RedHawks"), the longer/more specific
-one wins. No hardcoded alias list needed for the general case -- it self-
-resolves from whatever short names CFBD already gave your games. Add entries
-to TEAM_ALIASES below only for the rare case where prefix matching still
-doesn't line up.
+use short school names (e.g. "Ohio State"). This resolves that using CFBD's
+own /teams list (school + mascot, covering every division) as the source of
+truth: "Ohio State Buckeyes" exact-matches CFBD's own "Ohio State" + "Buckeyes"
+and resolves to "Ohio State" precisely.
+
+This used to be done by prefix-matching against only the teams in your
+seeded games, which had a real bug: "Idaho" (seeded, ranked) and "Idaho
+State" (unseeded, unranked) are different schools, but since "Idaho State"
+wasn't in the candidate pool, "Idaho State Bengals" incorrectly matched the
+shorter "Idaho" -- silently overwriting the real Idaho @ Utah line with the
+wrong game's spread. Using CFBD's full team list instead of a partial one
+avoids that: "Idaho State Bengals" now resolves to "Idaho State", which
+correctly doesn't match anything in your (ranked-only) seeded games, so
+it's skipped instead of corrupting an unrelated game.
+
+The old prefix-matching against seeded games is kept as a fallback only,
+for the rare case a team isn't found in CFBD's team list at all.
 
 Bookmaker key: The Odds API's widget lists Hard Rock Bet separately per
 state ("Hard Rock Bet", "Hard Rock Bet (FL)", etc). Rather than hardcode a
@@ -50,40 +58,69 @@ import os
 import requests
 
 ODDS_API_BASE = "https://api.the-odds-api.com/v4/sports/americanfootball_ncaaf/odds"
+CFBD_TEAMS_URL = "https://api.collegefootballdata.com/teams"
 
 # Reference book for value comparison -- pick whichever major book you want
 # Hard Rock's number compared against. Falls back to the first non-Hard-Rock
 # book in the response if this key isn't present for a given game.
 REFERENCE_BOOK_KEY = "draftkings"
 
-# Add entries here only if longest-prefix matching still doesn't resolve a
-# specific team correctly (e.g. Odds API uses a genuinely different school
-# name, not just school+mascot). Key is the Odds API's exact team string.
+# Add entries here only if CFBD's team list still doesn't resolve a specific
+# team correctly (e.g. Odds API uses a genuinely different name). Key is the
+# Odds API's exact team string.
 TEAM_ALIASES = {
     # "Ole Miss Rebels": "Ole Miss",
 }
 
 
-def build_team_resolver(known_games):
+def fetch_cfbd_team_map(cfbd_api_key):
     """
-    Builds a resolver that maps an Odds API team name (school + mascot) back
-    to whichever short school name CFBD used when the game was seeded, via
-    longest-prefix matching at a word boundary. Returns a function
-    resolve(odds_team_name) -> short_name or None.
+    Builds {"school mascot" (lowercase): "school"} from CFBD's full team
+    list -- the authoritative source for turning an Odds-API-style full name
+    ("Idaho State Bengals") back into CFBD's short school name ("Idaho
+    State"), covering every division so it can't be confused with a
+    similarly-prefixed but different school.
+    """
+    resp = requests.get(
+        CFBD_TEAMS_URL, headers={"Authorization": f"Bearer {cfbd_api_key}"}, timeout=30
+    )
+    resp.raise_for_status()
+    team_map = {}
+    for t in resp.json():
+        school = t.get("school")
+        mascot = t.get("mascot")
+        if not school:
+            continue
+        team_map[school.strip().lower()] = school
+        if mascot:
+            team_map[f"{school} {mascot}".strip().lower()] = school
+    return team_map
+
+
+def build_team_resolver(known_games, cfbd_team_map):
+    """
+    Returns resolve(odds_team_name) -> short_name or None. Tries, in order:
+      1. TEAM_ALIASES exact override.
+      2. Exact match against CFBD's full team list (school+mascot) -- the
+         precise, authoritative path.
+      3. Longest-prefix match against your seeded games' team names, as a
+         fallback for the rare team CFBD's list doesn't cover cleanly.
     """
     candidates = set()
     for g in known_games:
         candidates.add(g["away"])
         candidates.add(g["home"])
-    # Longest first, so "Miami (OH)" is tried before the shorter "Miami"
-    # when matching "Miami (OH) RedHawks" -- prevents the more specific
-    # school from being shadowed by a shorter, coincidentally-matching one.
     candidates = sorted(candidates, key=len, reverse=True)
 
     def resolve(odds_name):
         if odds_name in TEAM_ALIASES:
             return TEAM_ALIASES[odds_name]
+
         name_lower = odds_name.strip().lower()
+
+        if name_lower in cfbd_team_map:
+            return cfbd_team_map[name_lower]
+
         for cand in candidates:
             cand_lower = cand.strip().lower()
             if name_lower == cand_lower:
@@ -146,13 +183,15 @@ def check_response(resp):
 
 def main():
     odds_api_key = os.environ["ODDS_API_KEY"]
+    cfbd_api_key = os.environ["CFBD_API_KEY"]
     app_url = os.environ["APP_URL"].rstrip("/")
     ingest_token = os.environ.get("INGEST_TOKEN", "")
 
     games_resp = requests.get(f"{app_url}/api/games", timeout=30)
     check_response(games_resp)
     known_games = games_resp.json().get("games", [])
-    resolve_team = build_team_resolver(known_games)
+    cfbd_team_map = fetch_cfbd_team_map(cfbd_api_key)
+    resolve_team = build_team_resolver(known_games, cfbd_team_map)
     lookup = {(g["away"].lower(), g["home"].lower()): g["gameId"] for g in known_games}
 
     events = fetch_odds_api_games(odds_api_key)

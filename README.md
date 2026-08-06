@@ -104,7 +104,7 @@ counts as "notable."
 Then pull lines for those games:
 
 ```
-ODDS_API_KEY=xxx APP_URL=https://your-site.netlify.app INGEST_TOKEN=xxx \
+ODDS_API_KEY=xxx CFBD_API_KEY=xxx APP_URL=https://your-site.netlify.app INGEST_TOKEN=xxx \
 python scripts/fetch_lines.py
 ```
 
