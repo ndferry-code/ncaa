@@ -28,6 +28,12 @@ explicitly for that one run.
 
 NOTABLE_GAMES currently has no effect on filtering (see build_games()) --
 kept defined in case you want to re-enable it later.
+
+Ranking source: real AP Top 25 when it's out; before that (e.g. the gap
+between the Coaches Poll and AP preseason poll each August), falls back to
+the Coaches Poll as a stand-in so the tracker isn't empty during that
+window. Switches back to AP automatically the moment it's available, since
+AP is always checked first. See get_ap_ranks() for the exact fallback order.
 """
 
 import argparse
@@ -117,35 +123,51 @@ def get_current_week(weeks):
 
 def get_ap_ranks(year, week, api_key):
     """
-    Returns {school: rank} for the AP Top 25 in the given week. Handles two
-    CFBD quirks:
-      1. Poll name matching is case-insensitive substring match, not exact,
-         since preseason polls are sometimes labeled slightly differently.
-      2. If the requested week has no AP poll yet (common early in the
-         season -- the preseason poll is often filed under week 1 instead),
-         this falls back to week 1's poll. If even that's empty, it just
-         returns {} -- meaning ranked games won't show up until the poll is
-         actually out, so lean on NOTABLE_GAMES for anything you want
-         tracked before then.
+    Returns (ranks, poll_used) where ranks is {school: rank}. Priority order:
+      1. The real AP Top 25 for the requested week.
+      2. The AP Top 25 under week 1 (the preseason poll is often filed there
+         even before Week 1 games happen).
+      3. The Coaches Poll, same week-then-week-1 fallback -- a stand-in for
+         the early-August gap where the Coaches Poll is already out but the
+         AP preseason poll (usually mid-August) isn't yet. Once the AP poll
+         drops, it's picked up automatically since it's always tried first.
+
+    Poll name matching is a case-insensitive substring match, since these
+    are sometimes labeled slightly differently between seasons.
+
+    Returns ({}, None) if nothing at all is available yet.
     """
-    def ranks_for(w):
+    def ranks_for(w, poll_substr):
         rankings = cfbd_get("/rankings", {"year": year, "week": w, "seasonType": "regular"}, api_key)
         ranks = {}
         for poll_week in rankings:
             for poll in poll_week.get("polls", []):
-                if "ap top 25" in poll.get("poll", "").lower():
+                if poll_substr in poll.get("poll", "").lower():
                     for rank in poll.get("ranks", []):
                         ranks[rank["school"]] = rank["rank"]
         return ranks
 
-    ranks = ranks_for(week)
-    if not ranks and week != 1:
-        ranks = ranks_for(1)  # preseason poll is often filed under week 1
-    return ranks
+    weeks_to_try = [week] if week == 1 else [week, 1]
+
+    for w in weeks_to_try:
+        ranks = ranks_for(w, "ap top 25")
+        if ranks:
+            return ranks, "AP Top 25"
+
+    for w in weeks_to_try:
+        ranks = ranks_for(w, "coaches")
+        if ranks:
+            return ranks, "Coaches Poll (AP not out yet)"
+
+    return {}, None
 
 
 def build_games(year, week, api_key, include_all=False):
-    ap_ranks = get_ap_ranks(year, week, api_key)
+    ap_ranks, poll_used = get_ap_ranks(year, week, api_key)
+    if poll_used:
+        print(f"Using {poll_used} for rankings.")
+    else:
+        print("No poll (AP or Coaches) available yet -- games will show unranked.")
     games = cfbd_get(
         "/games",
         {"year": year, "week": week, "seasonType": "regular", "division": "fbs"},
