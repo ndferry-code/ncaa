@@ -38,10 +38,19 @@ function fmtSpread(n) {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
-function gameLabel(g) {
+function gameLabel(g, hrSpread) {
   const awayRank = g.apRankAway ? `#${g.apRankAway} ` : "";
   const homeRank = g.apRankHome ? `#${g.apRankHome} ` : "";
-  return `${awayRank}${g.away} @ ${homeRank}${g.home}`;
+  let awayName = `${awayRank}${g.away}`;
+  let homeName = `${homeRank}${g.home}`;
+  // hrSpread is always the HOME team's number (see fetch_lines.py's
+  // spread_for_home) -- negative means home is favored, positive means away
+  // is favored, 0 is a pick'em. Bold whichever team is favored.
+  if (typeof hrSpread === "number") {
+    if (hrSpread < 0) homeName = `<strong>${homeName}</strong>`;
+    else if (hrSpread > 0) awayName = `<strong>${awayName}</strong>`;
+  }
+  return `${awayName} @ ${homeName}`;
 }
 
 function renderTicker() {
@@ -56,7 +65,7 @@ function renderTicker() {
       const g = state.games.find((x) => x.gameId === m.gameId);
       const dir = m.hardrock.deltaPts > 0 ? "up" : "down";
       const arrow = m.hardrock.deltaPts > 0 ? "▲" : "▼";
-      return `<span class="item">${g ? gameLabel(g) : m.gameId}: ${fmtSpread(m.hardrock.open)} → ${fmtSpread(
+      return `<span class="item">${g ? gameLabel(g, m.hardrock.current) : m.gameId}: ${fmtSpread(m.hardrock.open)} → ${fmtSpread(
         m.hardrock.current
       )} <span class="${dir}">${arrow} ${Math.abs(m.hardrock.deltaPts)} pts</span></span>`;
     })
@@ -89,9 +98,18 @@ function renderGamesTable() {
     .map((g) => {
       const bet = state.bets.find((b) => b.gameId === g.gameId);
       const vc = state.valueComparison.find((v) => v.gameId === g.gameId);
-      const kickoff = g.kickoff ? new Date(g.kickoff).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }) : "—";
-      const hrSpread = vc ? fmtSpread(vc.hardrockSpread) : "—";
-      const refSpread = vc ? `${fmtSpread(vc.referenceSpread)} (${vc.referenceBook || "ref"})` : "—";
+      const lm = state.lineMovement.find((m) => m.gameId === g.gameId);
+      const kickoff = g.kickoff
+        ? new Date(g.kickoff).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+        : "—";
+      // Show the Hard Rock / reference spread independently whenever either
+      // exists -- don't require both just because "edge" needs both. A game
+      // with only a Hard Rock line (reference not posted yet, or vice versa)
+      // should still show whichever number is actually available.
+      const hrCurrent = lm ? lm.hardrock.current : null;
+      const refCurrent = lm ? lm.reference.current : null;
+      const hrSpread = fmtSpread(hrCurrent);
+      const refSpread = refCurrent != null ? `${fmtSpread(refCurrent)} (${lm.reference.book || "ref"})` : "—";
       let edgeHtml = "—";
       if (vc) {
         const cls = vc.edgePts > 0 ? "edge-favor" : vc.edgePts < 0 ? "edge-against" : "edge-neutral";
@@ -107,7 +125,7 @@ function renderGamesTable() {
         : "—";
       return `<tr>
         <td class="mono">${kickoff}</td>
-        <td>${gameLabel(g)}</td>
+        <td>${gameLabel(g, hrCurrent)}</td>
         <td class="mono">${hrSpread}</td>
         <td class="mono">${refSpread}</td>
         <td>${edgeHtml}</td>
@@ -141,7 +159,7 @@ function renderMovementTable() {
         .slice(-8)
         .join(" → ");
       return `<tr>
-        <td>${g ? gameLabel(g) : m.gameId}${m.biggestMover ? ' <span class="pill pending">MOVER</span>' : ""}</td>
+        <td>${g ? gameLabel(g, m.hardrock.current) : m.gameId}${m.biggestMover ? ' <span class="pill pending">MOVER</span>' : ""}</td>
         <td class="mono">${fmtSpread(m.hardrock.open)}</td>
         <td class="mono">${fmtSpread(m.hardrock.current)}</td>
         <td class="mono ${cls}">${delta != null ? (delta > 0 ? "+" : "") + delta : "—"}</td>

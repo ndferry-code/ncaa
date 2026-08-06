@@ -113,20 +113,33 @@ python scripts/fetch_lines.py
 Week 0 is handled specially: instead of filtering to ranked/notable games,
 the script includes **every FBS game** that week, since the Week 0 slate is
 small. This kicks in automatically whenever the resolved week is the
-earliest one on CFBD's calendar — nothing to flag. (`--all-games` is there
-if you ever want that same behavior for a different week on demand.)
+earliest one with any scheduled games — nothing to flag. (`--all-games` is
+there if you ever want that same behavior for a different week on demand.)
+
+**CFBD sometimes hasn't split Week 0 from Week 1 in their data yet** this
+early in the season — both get tagged with the same week number, which
+shows up as a suspiciously large game count (200+ instead of the usual
+~65-70). The script detects this automatically: if there's a clear multi-day
+gap in kickoff times within the batch, it splits the earlier cluster off as
+Week 0 (kept in full) and re-applies the normal ranked/notable filter to the
+later cluster. You'll see a line like `Detected an unsplit opening batch...`
+in the log when this happens. Once CFBD updates their own week tagging
+(usually as the season gets closer), a routine reseed will just reflect
+their corrected numbers directly and this split logic becomes a no-op.
 
 One thing to know if you're doing this a couple weeks out: **the AP
 preseason poll usually isn't out yet.** That's fine for Week 0 itself since
 it tracks everything regardless of rank — but it does mean games will show
-up with no rank badge until the poll drops. Once it's out, just re-run the
-seed and ranks backfill onto whatever's still on the board.
+up with no rank badge until the poll drops, and the later (Week 1+) cluster
+above won't have anything to filter *in* by rank yet either. Once the poll's
+out, just re-run the seed and ranks backfill onto whatever's still on the
+board.
 
 **Week 1 takes over automatically once Week 0 wraps.** You don't need to do
 anything: the Monday cron in the workflow re-runs `seed_games.py` with no
-`--week` flag, which asks CFBD's calendar what "now" falls into, and Week 1
-is no longer the opening week so it goes back to ranked/notable filtering.
-Week 0's bets and lines stay in the app — the week dropdown on the dashboard
+`--week` flag, which asks what "now" falls into, and Week 1 is no longer the
+opening week so it goes back to ranked/notable filtering on its own. Week
+0's bets and lines stay in the app — the week dropdown on the dashboard
 still shows them, they're just no longer the default view.
 
 ## 7. Use it
