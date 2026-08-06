@@ -108,39 +108,34 @@ ODDS_API_KEY=xxx APP_URL=https://your-site.netlify.app INGEST_TOKEN=xxx \
 python scripts/fetch_lines.py
 ```
 
-### Starting early, before the season (e.g. seeding Week 0)
+### Early-season note
 
-Week 0 is handled specially: instead of filtering to ranked/notable games,
-the script includes **every FBS game** that week, since the Week 0 slate is
-small. This kicks in automatically whenever the resolved week is the
-earliest one with any scheduled games — nothing to flag. (`--all-games` is
-there if you ever want that same behavior for a different week on demand.)
+CFBD sometimes hasn't split "Week 0" from "Week 1" apart in their own data
+yet this early in the season — both get tagged under the same week number,
+which is fine: the ranked/notable filter applies to the combined batch as
+one week either way, so you don't need to think about it. If you ever want
+a specific week to include every game regardless of rank (e.g. because the
+AP poll isn't out yet and you still want a small early slate fully
+tracked), pass `--all-games` for that one run — just know it'll pull in
+every FBS game CFBD has for that week number, which can be a big batch once
+Week 0 and Week 1 are lumped together.
 
-**CFBD sometimes hasn't split Week 0 from Week 1 in their data yet** this
-early in the season — both get tagged with the same week number, which
-shows up as a suspiciously large game count (200+ instead of the usual
-~65-70). The script detects this automatically: if there's a clear multi-day
-gap in kickoff times within the batch, it splits the earlier cluster off as
-Week 0 (kept in full) and re-applies the normal ranked/notable filter to the
-later cluster. You'll see a line like `Detected an unsplit opening batch...`
-in the log when this happens. Once CFBD updates their own week tagging
-(usually as the season gets closer), a routine reseed will just reflect
-their corrected numbers directly and this split logic becomes a no-op.
+If you seed before the AP preseason poll is out, expect zero games back
+(nothing qualifies as ranked yet) unless you've listed specific games in
+`NOTABLE_GAMES`. Re-run the seed once the poll drops and ranks fill in
+normally.
 
-One thing to know if you're doing this a couple weeks out: **the AP
-preseason poll usually isn't out yet.** That's fine for Week 0 itself since
-it tracks everything regardless of rank — but it does mean games will show
-up with no rank badge until the poll drops, and the later (Week 1+) cluster
-above won't have anything to filter *in* by rank yet either. Once the poll's
-out, just re-run the seed and ranks backfill onto whatever's still on the
-board.
+### One-time cleanup if you tried the earlier Week 0/Week 1 split
 
-**Week 1 takes over automatically once Week 0 wraps.** You don't need to do
-anything: the Monday cron in the workflow re-runs `seed_games.py` with no
-`--week` flag, which asks what "now" falls into, and Week 1 is no longer the
-opening week so it goes back to ranked/notable filtering on its own. Week
-0's bets and lines stay in the app — the week dropdown on the dashboard
-still shows them, they're just no longer the default view.
+An earlier version of this script split Week 0 out from Week 1 as separate
+weeks. That's been removed — they're combined again. If your app still shows
+a leftover "Week 0" in the dropdown from that earlier version, clear it out
+once:
+
+```
+curl -X DELETE "https://your-site.netlify.app/api/games?week=0" \
+  -H "x-ingest-token: YOUR_INGEST_TOKEN"
+```
 
 ## 7. Use it
 

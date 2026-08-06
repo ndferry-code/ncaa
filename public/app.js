@@ -47,8 +47,8 @@ function gameLabel(g, hrSpread) {
   // spread_for_home) -- negative means home is favored, positive means away
   // is favored, 0 is a pick'em. Bold whichever team is favored.
   if (typeof hrSpread === "number") {
-    if (hrSpread < 0) homeName = `<strong>${homeName}</strong>`;
-    else if (hrSpread > 0) awayName = `<strong>${awayName}</strong>`;
+    if (hrSpread < 0) homeName = `<span class="favorite">${homeName}</span>`;
+    else if (hrSpread > 0) awayName = `<span class="favorite">${awayName}</span>`;
   }
   return `${awayName} @ ${homeName}`;
 }

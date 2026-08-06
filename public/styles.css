@@ -170,6 +170,7 @@ tbody td {
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--panel-raised); }
 .mono { font-family: var(--font-mono); }
+.favorite { font-weight: 700; color: var(--turf); }
 .pill {
   display: inline-block;
   padding: 2px 8px;

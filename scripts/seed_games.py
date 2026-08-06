@@ -17,23 +17,21 @@ whichever week we're currently inside (falling back to the most recently
 weeks). That's what the GitHub Actions workflow does every Monday -- no
 CURRENT_WEEK variable to maintain.
 
-Week 0 (the season's opening week) is handled specially: instead of
-filtering to ranked/notable games, it includes EVERY FBS game that week,
-since the Week 0 slate is small enough to track in full. This kicks in
-automatically whenever the resolved week is the earliest one with any
-scheduled games -- no flag needed. Pass --all-games explicitly if you ever
-want that same "everything" behavior for a week that wouldn't otherwise
-qualify.
+Ranked/notable filtering always applies -- there's no more "Week 0 gets
+everything" special case (it caused more problems than it solved: CFBD
+often hasn't split Week 0 from Week 1 in their own data yet this early,
+which made the "opening week" auto-detection unreliable). If you want a
+specific week to include every game regardless of rank, pass --all-games
+explicitly for that one run.
 
-NOTABLE_GAMES below is yours to edit each week for the non-ranked matchups you
-want tracked (rivalry games, primetime games, whatever catches your eye) --
-it only matters for weeks that aren't running in "all games" mode.
+NOTABLE_GAMES below is yours to edit each week for the non-ranked matchups
+you want tracked (rivalry games, primetime games, whatever catches your eye).
 """
 
 import argparse
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import requests
 
 CFBD_BASE = "https://api.collegefootballdata.com"
@@ -118,14 +116,15 @@ def get_current_week(weeks):
 def get_ap_ranks(year, week, api_key):
     """
     Returns {school: rank} for the AP Top 25 in the given week. Handles two
-    CFBD quirks that matter most for Week 0:
+    CFBD quirks:
       1. Poll name matching is case-insensitive substring match, not exact,
          since preseason polls are sometimes labeled slightly differently.
-      2. If the requested week has no AP poll yet (common for Week 0 -- the
-         preseason poll is often filed under week 1 instead), this falls
-         back to week 1's poll. If even that's empty, it just returns {} --
-         meaning ranked games won't show up until the poll is actually out,
-         so lean on NOTABLE_GAMES for anything you want tracked before then.
+      2. If the requested week has no AP poll yet (common early in the
+         season -- the preseason poll is often filed under week 1 instead),
+         this falls back to week 1's poll. If even that's empty, it just
+         returns {} -- meaning ranked games won't show up until the poll is
+         actually out, so lean on NOTABLE_GAMES for anything you want
+         tracked before then.
     """
     def ranks_for(w):
         rankings = cfbd_get("/rankings", {"year": year, "week": w, "seasonType": "regular"}, api_key)
@@ -177,63 +176,6 @@ def build_games(year, week, api_key, include_all=False):
     return out
 
 
-def split_opening_batch(games, resolved_week, year, gap_hours=48, max_split_days=14):
-    """
-    CFBD sometimes hasn't split Week 0 from Week 1 yet this early in the
-    season -- both get tagged with the same week number, which is why the
-    "opening week" batch can come back way oversized (200+ games instead of
-    the ~65-70 a normal week has). This detects that: if there's a clear gap
-    of `gap_hours`+ between two clusters of kickoff times within the first
-    `max_split_days` days, the earlier cluster gets relabeled as Week 0
-    (kept in full) and the later cluster reverts to `resolved_week` with the
-    normal ranked/notable filter re-applied (since it's not really the
-    opening week once split out).
-
-    If no such gap is found, returns games unchanged -- this is a no-op for
-    a normal, already-correctly-split week.
-    """
-    dated = [g for g in games if g.get("kickoff")]
-    if len(dated) < 2:
-        return games
-
-    dated.sort(key=lambda g: g["kickoff"])
-    parsed = [datetime.fromisoformat(g["kickoff"].replace("Z", "+00:00")) for g in dated]
-
-    biggest_gap = timedelta(0)
-    split_idx = None
-    for i in range(len(parsed) - 1):
-        gap = parsed[i + 1] - parsed[i]
-        if gap > biggest_gap:
-            biggest_gap = gap
-            split_idx = i
-
-    if split_idx is None or biggest_gap < timedelta(hours=gap_hours):
-        return games  # no clear two-cluster split -- leave as-is
-    if parsed[split_idx] - parsed[0] > timedelta(days=max_split_days):
-        return games  # gap happens too late to plausibly be a week0/week1 seam
-
-    early_ids = {g["gameId"] for g in dated[: split_idx + 1]}
-    print(
-        f"Detected an unsplit opening batch: {len(early_ids)} games before a "
-        f"{biggest_gap} gap, {len(dated) - len(early_ids)} after. Splitting "
-        f"the earlier cluster into Week 0."
-    )
-
-    out = []
-    for g in games:
-        if g["gameId"] in early_ids:
-            g["week"] = 0
-            g["gameId"] = g["gameId"].replace(f"-wk{resolved_week}-", "-wk0-", 1)
-            out.append(g)
-        else:
-            g["week"] = resolved_week
-            # Re-apply the normal ranked/notable filter to the later cluster
-            # -- it's genuinely resolved_week now, not the opening week.
-            if g["apRankAway"] or g["apRankHome"] or g["notable"]:
-                out.append(g)
-    return out
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--year", type=int, required=True)
@@ -241,8 +183,7 @@ def main():
     parser.add_argument(
         "--all-games",
         action="store_true",
-        help="Include every FBS game that week, not just ranked/notable. "
-        "Applied automatically for the season's opening week regardless of this flag.",
+        help="Include every FBS game that week, not just ranked/notable.",
     )
     args = parser.parse_args()
 
@@ -257,17 +198,9 @@ def main():
         week = get_current_week(calendar_weeks)
         print(f"Auto-detected current week: {week}")
 
-    is_opening_week = bool(calendar_weeks) and week == calendar_weeks[0]["week"]
-    include_all = args.all_games or is_opening_week
-    if is_opening_week and not args.all_games:
-        print(f"Week {week} is the season's opening week -- including all FBS games, not just ranked/notable.")
-
-    games = build_games(args.year, week, cfbd_key, include_all=include_all)
-    if is_opening_week and not args.all_games:
-        games = split_opening_batch(games, week, args.year)
-
+    games = build_games(args.year, week, cfbd_key, include_all=args.all_games)
     if not games:
-        print(f"No games found for {args.year} week {week}.")
+        print(f"No ranked/notable games found for {args.year} week {week}.")
         sys.exit(0)
 
     resp = requests.post(

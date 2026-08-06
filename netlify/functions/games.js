@@ -3,6 +3,7 @@ const { getRedis, json, requireAuth } = require("./_redis");
 // GET  /api/games?week=3          -> list games for a week
 // GET  /api/games                 -> list all games across all weeks
 // POST /api/games                 -> upsert one or many games. Body: { games: [...], replace: true } or a single game object
+// DELETE /api/games?week=0        -> remove an entire week's games (e.g. cleaning up after a schema/behavior change)
 // `replace: true` fully replaces that week's game list with exactly what's
 // sent (used by the weekly reseed script). Omit it for a one-off addition --
 // then games are just added/updated, nothing existing gets removed.
@@ -66,6 +67,19 @@ exports.handler = async (event) => {
       await redis.sadd("season:weeks", String(g.week));
     }
     return json(200, { saved: valid.length, removed: games.length - valid.length });
+  }
+
+  if (event.httpMethod === "DELETE") {
+    if (!requireAuth(event)) return json(401, { error: "unauthorized" });
+    const week = event.queryStringParameters && event.queryStringParameters.week;
+    if (week === undefined || week === null) return json(400, { error: "week query param required" });
+    const ids = await redis.smembers(`week:${week}:games`);
+    if (ids.length) {
+      await redis.del(...ids.map((id) => `game:${id}`));
+      await redis.del(`week:${week}:games`);
+    }
+    await redis.srem("season:weeks", String(week));
+    return json(200, { deletedWeek: week, removedGames: ids.length });
   }
 
   return json(405, { error: "method not allowed" });
