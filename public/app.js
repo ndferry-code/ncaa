@@ -14,13 +14,15 @@ async function loadWeeks() {
     state.week = current;
   }
   select.addEventListener("change", () => {
-    state.week = select.value;
+    state.week = Number(select.value);
     loadDashboard();
   });
 }
 
 async function loadDashboard() {
-  const url = state.week ? `${API}/dashboard?week=${state.week}` : `${API}/dashboard`;
+  // state.week can legitimately be 0 (Week 0), which is falsy in JS -- use
+  // an explicit null/undefined check rather than truthiness everywhere below.
+  const url = state.week != null ? `${API}/dashboard?week=${state.week}` : `${API}/dashboard`;
   const res = await fetch(url);
   const data = await res.json();
   state = { ...state, ...data };

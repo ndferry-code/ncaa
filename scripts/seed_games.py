@@ -10,18 +10,20 @@ Run manually:
     CFBD_API_KEY=xxx APP_URL=https://your-site.netlify.app INGEST_TOKEN=xxx \
     python scripts/seed_games.py --year 2026 --week 3
 
---week is optional. If you omit it, the script asks CFBD's /calendar endpoint
-for the season's week date ranges and picks whichever week we're currently
-inside (falling back to the most recently *started* week once ranges end,
-e.g. during a Sunday/Monday gap between weeks). That's what the GitHub
-Actions workflow does every Monday -- no CURRENT_WEEK variable to maintain.
+--week is optional. If you omit it, the script derives each week's date
+window from actual game kickoff times (see get_season_weeks()) and picks
+whichever week we're currently inside (falling back to the most recently
+*started* week once ranges end, e.g. during a Sunday/Monday gap between
+weeks). That's what the GitHub Actions workflow does every Monday -- no
+CURRENT_WEEK variable to maintain.
 
 Week 0 (the season's opening week) is handled specially: instead of
 filtering to ranked/notable games, it includes EVERY FBS game that week,
 since the Week 0 slate is small enough to track in full. This kicks in
-automatically whenever the resolved week is the earliest one on CFBD's
-calendar -- no flag needed. Pass --all-games explicitly if you ever want
-that same "everything" behavior for a week that wouldn't otherwise qualify.
+automatically whenever the resolved week is the earliest one with any
+scheduled games -- no flag needed. Pass --all-games explicitly if you ever
+want that same "everything" behavior for a week that wouldn't otherwise
+qualify.
 
 NOTABLE_GAMES below is yours to edit each week for the non-ranked matchups you
 want tracked (rivalry games, primetime games, whatever catches your eye) --
@@ -58,42 +60,45 @@ def slugify(s):
     return "".join(c.lower() if c.isalnum() else "-" for c in s).strip("-")
 
 
-def get_calendar_weeks(year, api_key):
+def get_season_weeks(year, api_key):
     """
-    Returns the season's regular-season weeks from CFBD's /calendar,
-    sorted by start date, as [{week, start, end}, ...].
+    Derives each week's date window directly from actual game kickoff times,
+    rather than CFBD's /calendar endpoint. /calendar's aggregate per-week
+    dates can be null this far ahead of the season for weeks whose kickoff
+    times aren't finalized yet (Week 0 is the common case) -- which caused
+    Week 0 to get silently dropped and Week 1 to look like the season's
+    earliest week. Reading dates off individual games instead avoids that.
+
+    Returns [{week, start, end}, ...] sorted by week number.
     """
-    calendar = cfbd_get("/calendar", {"year": year}, api_key)
-    weeks = []
-    for entry in calendar:
-        if entry.get("seasonType") not in ("regular", None):
+    games = cfbd_get(
+        "/games", {"year": year, "seasonType": "regular", "division": "fbs"}, api_key
+    )
+    by_week = {}
+    for g in games:
+        week_num = g.get("week")
+        start_raw = g.get("startDate") or g.get("start_date")
+        if week_num is None or not start_raw:
             continue
-        start = entry.get("firstGameStart") or entry.get("first_game_start")
-        end = entry.get("lastGameStart") or entry.get("last_game_start")
-        week_num = entry.get("week")
-        if not (start and week_num is not None):
-            continue
-        weeks.append(
-            {
-                "week": week_num,
-                "start": datetime.fromisoformat(start.replace("Z", "+00:00")),
-                "end": datetime.fromisoformat(end.replace("Z", "+00:00")) if end else None,
-            }
-        )
-    weeks.sort(key=lambda w: w["start"])
-    return weeks
+        dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+        w = by_week.setdefault(week_num, {"week": week_num, "start": dt, "end": dt})
+        if dt < w["start"]:
+            w["start"] = dt
+        if dt > w["end"]:
+            w["end"] = dt
+    return sorted(by_week.values(), key=lambda w: w["week"])
 
 
 def get_current_week(weeks):
     """
-    Given get_calendar_weeks() output, picks whichever week "now" falls
+    Given get_season_weeks() output, picks whichever week "now" falls
     into (or the most recently started one, or the earliest if the season
     hasn't started yet).
     """
     now = datetime.now(timezone.utc)
 
     if not weeks:
-        raise ValueError("CFBD /calendar returned no usable regular-season weeks")
+        raise ValueError("CFBD returned no games with kickoff times for this year yet")
 
     # Currently inside a week's game window
     for w in weeks:
@@ -105,8 +110,8 @@ def get_current_week(weeks):
     if started:
         return started[-1]["week"]
 
-    # Season hasn't started yet -- default to the earliest week on the
-    # calendar, whatever CFBD numbers it (0 or 1 depending on the season).
+    # Season hasn't started yet -- default to the earliest week number that
+    # actually has games scheduled, whatever CFBD numbers it (0 or 1).
     return weeks[0]["week"]
 
 
@@ -188,7 +193,7 @@ def main():
     app_url = os.environ["APP_URL"].rstrip("/")
     ingest_token = os.environ.get("INGEST_TOKEN", "")
 
-    calendar_weeks = get_calendar_weeks(args.year, cfbd_key)
+    calendar_weeks = get_season_weeks(args.year, cfbd_key)
 
     week = args.week
     if week is None:
@@ -207,7 +212,7 @@ def main():
 
     resp = requests.post(
         f"{app_url}/api/games",
-        json={"games": games},
+        json={"games": games, "replace": True},
         headers={"x-ingest-token": ingest_token, "Content-Type": "application/json"},
         timeout=30,
     )

@@ -42,7 +42,7 @@ function computeRecord(bets) {
 
   const byWeek = {};
   for (const b of settled) {
-    const wk = b.week || "unknown";
+    const wk = b.week != null ? b.week : "unknown"; // week 0 is valid and falsy -- don't let `||` swallow it
     byWeek[wk] = byWeek[wk] || { wins: 0, losses: 0, pushes: 0 };
     byWeek[wk][b.result === "win" ? "wins" : b.result === "loss" ? "losses" : "pushes"] += 1;
   }
