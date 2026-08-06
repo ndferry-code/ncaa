@@ -16,6 +16,31 @@ function americanToDecimalPayout(odds) {
   return odds > 0 ? odds / 100 : 100 / Math.abs(odds);
 }
 
+// Break-even win rate implied by a given American price -- e.g. -110 needs
+// 110/210 = 52.38% winners just to break even (the vig).
+function americanToBreakevenPct(odds) {
+  const o = odds == null ? -110 : odds;
+  return o > 0 ? 100 / (100 + o) : Math.abs(o) / (Math.abs(o) + 100);
+}
+
+function computeStreak(bets) {
+  // Current consecutive win/loss streak, most recent bet first. Pushes are
+  // excluded entirely (neither break nor extend a streak) since they're a
+  // non-event for this purpose.
+  const decided = bets
+    .filter((b) => b.result === "win" || b.result === "loss")
+    .slice()
+    .sort((a, b) => new Date(a.placedAt) - new Date(b.placedAt));
+  if (!decided.length) return { type: null, count: 0 };
+  const last = decided[decided.length - 1].result;
+  let count = 0;
+  for (let i = decided.length - 1; i >= 0; i--) {
+    if (decided[i].result === last) count++;
+    else break;
+  }
+  return { type: last, count };
+}
+
 function computeRecord(bets) {
   const settled = bets.filter((b) => b.result === "win" || b.result === "loss" || b.result === "push");
   const wins = settled.filter((b) => b.result === "win").length;
@@ -47,7 +72,27 @@ function computeRecord(bets) {
     byWeek[wk][b.result === "win" ? "wins" : b.result === "loss" ? "losses" : "pushes"] += 1;
   }
 
-  return { wins, losses, pushes, winPct, units: Math.round(units * 100) / 100, avgClv, byWeek };
+  // Break-even target from your actual average price across ALL bets
+  // (pending included) -- represents your typical juice, not skewed by
+  // which particular bets happened to win. Defaults to -110's 52.38% when
+  // there's no data yet.
+  const oddsSource = bets.length ? bets : [{ odds: -110 }];
+  const breakevenPct =
+    oddsSource.reduce((sum, b) => sum + americanToBreakevenPct(b.odds), 0) / oddsSource.length;
+
+  const streak = computeStreak(settled);
+
+  return {
+    wins,
+    losses,
+    pushes,
+    winPct,
+    units: Math.round(units * 100) / 100,
+    avgClv,
+    byWeek,
+    breakevenPct,
+    streak,
+  };
 }
 
 exports.handler = async (event) => {

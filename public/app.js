@@ -27,10 +27,67 @@ async function loadDashboard() {
   const data = await res.json();
   state = { ...state, ...data };
   renderTicker();
+  renderBreakevenHero();
   renderRecordCards();
   renderGamesTable();
   renderMovementTable();
   renderInsights();
+}
+
+function renderBreakevenHero() {
+  const el = document.getElementById("breakevenHero");
+  const r = state.record || {};
+  const breakevenPct = (r.breakevenPct != null ? r.breakevenPct : 110 / 210) * 100;
+
+  if (r.winPct == null) {
+    el.innerHTML = `<div class="breakeven-card empty">
+      <div class="breakeven-empty-text">Log some bets to start tracking win % against your ${breakevenPct.toFixed(1)}% break-even target.</div>
+    </div>`;
+    return;
+  }
+
+  const winPct = r.winPct * 100;
+  const delta = winPct - breakevenPct;
+  const above = delta >= 0;
+
+  // Gauge is zoomed to a 35-65% window rather than 0-100 -- season win
+  // rates realistically live in that band, and the full range would make
+  // any real difference look like a rounding error.
+  const GAUGE_MIN = 35, GAUGE_MAX = 65;
+  const clampPos = (v) => Math.max(0, Math.min(100, ((v - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100));
+  const fillPos = clampPos(winPct);
+  const markerPos = clampPos(breakevenPct);
+
+  const grade =
+    delta >= 10 ? "A+" : delta >= 5 ? "A" : delta >= 0 ? "B" : delta >= -5 ? "C" : "F";
+
+  let streakHtml = "";
+  if (r.streak && r.streak.count > 0) {
+    const emoji = r.streak.type === "win" ? "🔥" : "🧊";
+    const label = r.streak.type === "win" ? "W" : "L";
+    streakHtml = `<div class="breakeven-streak">${emoji} ${r.streak.count}${label}</div>`;
+  }
+
+  el.innerHTML = `<div class="breakeven-card ${above ? "above" : "below"}">
+    <div class="breakeven-top">
+      <div class="breakeven-figure">
+        <div class="breakeven-pct">${winPct.toFixed(1)}%</div>
+        <div class="breakeven-label">WIN % ATS</div>
+      </div>
+      <div class="breakeven-grade">${grade}</div>
+      ${streakHtml}
+    </div>
+    <div class="breakeven-gauge">
+      <div class="breakeven-track">
+        <div class="breakeven-fill" style="width:${fillPos}%"></div>
+        <div class="breakeven-marker" style="left:${markerPos}%"></div>
+      </div>
+      <div class="breakeven-scale">
+        <span>${GAUGE_MIN}%</span><span>break-even ${breakevenPct.toFixed(1)}%</span><span>${GAUGE_MAX}%</span>
+      </div>
+    </div>
+    <div class="breakeven-delta">${above ? "+" : ""}${delta.toFixed(1)} pts ${above ? "above" : "below"} break-even</div>
+  </div>`;
 }
 
 function fmtSpread(n) {
@@ -74,11 +131,13 @@ function renderTicker() {
 
 function renderRecordCards() {
   const r = state.record || {};
-  const winPct = r.winPct != null ? `${(r.winPct * 100).toFixed(1)}%` : "—";
+  const breakevenPct = (r.breakevenPct != null ? r.breakevenPct : 110 / 210) * 100;
   const units = r.units != null ? r.units : 0;
+  // Win % has its own big hero above now -- these cards cover what that
+  // doesn't: the exact record, the target itself, units, and CLV.
   const cards = [
     { label: "Record", value: `${r.wins || 0}-${r.losses || 0}-${r.pushes || 0}` },
-    { label: "Win %", value: winPct },
+    { label: "Break-even Target", value: `${breakevenPct.toFixed(1)}%` },
     { label: "Units", value: units > 0 ? `+${units}` : `${units}`, cls: units > 0 ? "positive" : units < 0 ? "negative" : "" },
     { label: "Avg CLV (pts)", value: r.avgClv != null ? r.avgClv.toFixed(2) : "—", cls: r.avgClv > 0 ? "positive" : r.avgClv < 0 ? "negative" : "" },
   ];
@@ -211,12 +270,44 @@ function renderInsights() {
 
 function openBetDialog(gameId) {
   const dialog = document.getElementById("betDialog");
+  const g = state.games.find((x) => x.gameId === gameId);
+  const lm = state.lineMovement.find((m) => m.gameId === gameId);
+  const hrCurrent = lm ? lm.hardrock.current : null; // this is always the HOME team's spread
+
   document.getElementById("betGameId").value = gameId;
   document.getElementById("betSide").value = "";
   document.getElementById("betSpread").value = "";
   document.getElementById("betOdds").value = -110;
   document.getElementById("betStake").value = 100;
   document.getElementById("betNotes").value = "";
+
+  const quickPickRow = document.getElementById("quickPickRow");
+  quickPickRow.innerHTML = "";
+
+  // One-tap buttons for the two teams at the current Hard Rock line, so the
+  // common case (you bet one side of the number the app is already
+  // tracking) needs no typing at all -- just tap the team, set stake, save.
+  if (g && typeof hrCurrent === "number") {
+    const awaySpread = Math.round(hrCurrent * -10) / 10;
+    const picks = [
+      { team: g.away, spread: awaySpread },
+      { team: g.home, spread: hrCurrent },
+    ];
+    picks.forEach((p) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "quick-pick-btn";
+      btn.textContent = `${p.team} ${fmtSpread(p.spread)}`;
+      btn.addEventListener("click", () => {
+        document.getElementById("betSide").value = `${p.team} ${fmtSpread(p.spread)}`;
+        document.getElementById("betSpread").value = p.spread;
+        quickPickRow.querySelectorAll(".quick-pick-btn").forEach((b) => b.classList.remove("selected"));
+        btn.classList.add("selected");
+      });
+      quickPickRow.appendChild(btn);
+    });
+  }
+
   dialog.showModal();
 }
 

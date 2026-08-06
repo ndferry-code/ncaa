@@ -27,12 +27,14 @@
   </section>
 
   <main class="wrap">
+    <section class="breakeven-hero" id="breakevenHero"></section>
+
     <section class="scoreboard-row" id="recordCards"></section>
 
     <section class="panel">
       <div class="panel-head">
         <h2>This Week's Slate</h2>
-        <span class="panel-note">Top 25 matchups. Log your bet as soon as you place it.</span>
+        <span class="panel-note">Top 25 matchups. Tap "Log bet", then tap the team you took &mdash; no typing needed.</span>
       </div>
       <div class="table-scroll">
         <table id="gamesTable">
@@ -86,6 +88,7 @@
     <form id="betForm" method="dialog">
       <h3 id="betDialogTitle">Log Bet</h3>
       <input type="hidden" id="betGameId" />
+      <div class="quick-pick-row" id="quickPickRow"></div>
       <label>Side
         <input type="text" id="betSide" placeholder="e.g. Ohio State -6.5" required />
       </label>
