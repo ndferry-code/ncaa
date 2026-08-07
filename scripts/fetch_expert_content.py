@@ -1,36 +1,37 @@
 """
-For every currently-seeded (ranked Top 25) game, searches the web for
-general news/storylines and for picks from three named handicappers, then
-uses Claude to produce a short, grounded summary -- paraphrased, sourced,
-and explicit about when no clear pick was found rather than guessing.
+For every currently-seeded (ranked Top 25) game, uses Claude's built-in
+agentic web search tool to research news/storylines and picks from three
+named handicappers, producing a short, grounded summary -- paraphrased,
+sourced, and explicit about when no clear pick was found rather than
+guessing.
 
-Two new services beyond what the rest of this app uses:
+This is genuinely agentic, not a fixed pipeline: Claude decides what to
+search for, how many searches to run (up to the cap below), and when it's
+found enough -- rather than this script handing it a rigid set of canned
+queries. The web search itself runs server-side as part of the same API
+call; there's no separate search API to wire up.
 
-1. Google Custom Search JSON API (the actual web search) -- free tier is
-   100 queries/day. Get a key + create a Programmable Search Engine at
-   https://programmablesearchengine.google.com (when creating it, set it to
-   search the entire web, not specific sites). You need both:
-     - GOOGLE_CSE_API_KEY
-     - GOOGLE_CSE_ID (this is the "cx" value from the search engine's setup page)
+One service beyond what the rest of this app uses:
 
-2. The Claude API (the summarization step) -- get a key at
-   https://console.anthropic.com. This is a paid API; at the game/query
-   volumes here (roughly 25 games/week, one Haiku call each) cost is small,
-   but it is real ongoing spend, unlike everything else in this project.
-     - ANTHROPIC_API_KEY
+  Anthropic API key -- get one at https://console.anthropic.com. This is a
+  paid API; web search specifically is billed at $10 per 1,000 searches
+  plus normal token costs for what Claude reads. At the volumes here
+  (~25 games/week, capped at MAX_SEARCHES_PER_GAME searches each) that's
+  real but modest ongoing spend -- unlike everything else in this project,
+  which is free.
+    - ANTHROPIC_API_KEY
 
 Run manually:
-    GOOGLE_CSE_API_KEY=xxx GOOGLE_CSE_ID=xxx ANTHROPIC_API_KEY=xxx \
-    APP_URL=https://your-site.netlify.app INGEST_TOKEN=xxx \
+    ANTHROPIC_API_KEY=xxx APP_URL=https://your-site.netlify.app INGEST_TOKEN=xxx \
     python scripts/fetch_expert_content.py
 
-Grounding, not guessing: Claude is given only the actual search snippets
-retrieved for that game and instructed to state a pick ONLY if it's clearly
-evidenced there, citing the source URL, and to say so explicitly when it
-isn't -- rather than inferring or fabricating a lean. Treat this as a
-starting point to skim with the source links, not a guaranteed-accurate
-transcript of what these people actually said -- web search snippets are an
-imperfect window into a full article, video, or podcast.
+Grounding, not guessing: Claude is instructed to state a pick ONLY if it's
+clearly evidenced in what it actually found via search, citing the source
+URL, and to say so explicitly when it isn't -- rather than inferring or
+fabricating a lean from general team quality. Treat this as a starting
+point to skim with the source links, not a guaranteed-accurate transcript
+of what these people actually said -- web search results are an imperfect
+window into a full article, video, or podcast.
 """
 
 import json
@@ -39,9 +40,9 @@ import sys
 from datetime import datetime, timezone
 import requests
 
-GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+MAX_SEARCHES_PER_GAME = 6
 
 EXPERTS = ["Chris Fallica", "Sam Panayotovich", "Joel Klatt"]
 
@@ -52,47 +53,19 @@ def check_response(resp):
     resp.raise_for_status()
 
 
-def google_search(query, api_key, cx, num=5):
-    resp = requests.get(
-        GOOGLE_CSE_URL,
-        params={"key": api_key, "cx": cx, "q": query, "num": num},
-        timeout=30,
-    )
-    if not resp.ok:
-        print(f"Search failed for {query!r}: {resp.status_code} {resp.text}")
-        return []
-    items = resp.json().get("items", [])
-    return [{"title": it.get("title"), "snippet": it.get("snippet"), "url": it.get("link")} for it in items]
-
-
-def gather_snippets(game, google_key, google_cx):
+def research_game(game, anthropic_key):
     away, home = game["away"], game["home"]
     matchup = f"{away} vs {home}"
 
-    news = google_search(f"{away} {home} college football preview injury report", google_key, google_cx)
+    prompt = f"""You're researching the college football game {matchup} for a personal betting tracker.
 
-    expert_results = {}
-    for expert in EXPERTS:
-        expert_results[expert] = google_search(
-            f'"{expert}" pick {away} {home} college football', google_key, google_cx, num=4
-        )
+Use web search (you have up to {MAX_SEARCHES_PER_GAME} searches -- use as many or as few as you actually need) to find:
+1. Current news, storylines, and injury reports for this specific matchup.
+2. Whether these three specific people have stated a pick/lean for this specific game: {", ".join(EXPERTS)}. Search for each by name along with the two teams.
 
-    return {"matchup": matchup, "news": news, "experts": expert_results}
-
-
-def summarize_with_claude(game, snippets, anthropic_key):
-    prompt = f"""You are helping summarize public betting/news content for a personal college football tracker. \
-Game: {snippets['matchup']}.
-
-Here are web search snippets about general news/storylines for this game:
-{json.dumps(snippets['news'], indent=2)}
-
-Here are web search snippets for each named expert's potential pick on this game:
-{json.dumps(snippets['experts'], indent=2)}
-
-Produce ONLY a JSON object (no markdown fences, no preamble) with this exact shape:
+Once you've searched enough, respond with ONLY a JSON object (no markdown fences, no preamble, no text after it) in exactly this shape:
 {{
-  "newsSummary": "2-3 sentence paraphrased summary of the current storylines/injuries/context for this game, in your own words. If the snippets have nothing substantive, use an empty string.",
+  "newsSummary": "2-3 sentence paraphrased summary of current storylines/injuries/context for this game, in your own words. Empty string if you found nothing substantive.",
   "picks": [
     {{"expert": "Chris Fallica", "leaning": "<team name>" or null, "note": "<short paraphrased reason, one sentence>" or null, "sourceUrl": "<url>" or null}},
     {{"expert": "Sam Panayotovich", "leaning": ..., "note": ..., "sourceUrl": ...}},
@@ -101,9 +74,10 @@ Produce ONLY a JSON object (no markdown fences, no preamble) with this exact sha
 }}
 
 Critical rules:
-- Only state a "leaning" if it is CLEARLY evidenced in the snippets above for that specific expert and this specific game. If the snippets don't clearly show a pick for an expert, set leaning, note, and sourceUrl to null for them -- do not guess or infer from general team quality.
-- Paraphrase everything in your own words. Do not copy sentences verbatim from the snippets.
+- Only state a "leaning" if you found it CLEARLY stated by that specific person for this specific game. If you didn't find a clear pick for someone, set their leaning, note, and sourceUrl to null -- do not guess or infer from general team quality or your own opinion.
+- Paraphrase everything in your own words. Do not copy sentences verbatim from what you find.
 - "leaning" should be the team name they favor (matching "{away}" or "{home}" as spelled), not a spread number.
+- Your final message must be ONLY the JSON object -- no other text before or after it.
 """
 
     resp = requests.post(
@@ -115,28 +89,43 @@ Critical rules:
         },
         json={
             "model": ANTHROPIC_MODEL,
-            "max_tokens": 1000,
+            "max_tokens": 2000,
             "messages": [{"role": "user", "content": prompt}],
+            "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": MAX_SEARCHES_PER_GAME}],
         },
-        timeout=60,
+        timeout=120,
     )
     check_response(resp)
-    text = resp.json()["content"][0]["text"].strip()
-    # Strip accidental markdown fences just in case.
+    body = resp.json()
+
+    # The web_search tool runs server-side within this same response --
+    # content can include search_result/tool_use blocks interspersed with
+    # text blocks (e.g. reasoning between search rounds). Concatenate just
+    # the text blocks in order to get Claude's actual final answer.
+    text = "".join(block.get("text", "") for block in body.get("content", []) if block.get("type") == "text").strip()
+
     if text.startswith("```"):
         text = text.strip("`")
         if text.startswith("json"):
             text = text[4:]
+        text = text.strip()
+
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        print(f"Could not parse Claude's response as JSON for {snippets['matchup']}: {text[:300]}")
+        # Fallback: sometimes a stray sentence sneaks in around the JSON
+        # despite instructions -- try to pull out just the {...} block.
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end != -1:
+            try:
+                return json.loads(text[start : end + 1])
+            except json.JSONDecodeError:
+                pass
+        print(f"Could not parse Claude's response as JSON for {matchup}: {text[:300]}")
         return {"newsSummary": "", "picks": [{"expert": e, "leaning": None, "note": None, "sourceUrl": None} for e in EXPERTS]}
 
 
 def main():
-    google_key = os.environ["GOOGLE_CSE_API_KEY"]
-    google_cx = os.environ["GOOGLE_CSE_ID"]
     anthropic_key = os.environ["ANTHROPIC_API_KEY"]
     app_url = os.environ["APP_URL"].rstrip("/")
     ingest_token = os.environ.get("INGEST_TOKEN", "")
@@ -145,7 +134,7 @@ def main():
     check_response(games_resp)
     all_games = games_resp.json().get("games", [])
     if not all_games:
-        print("No games seeded yet -- nothing to search for.")
+        print("No games seeded yet -- nothing to research.")
         sys.exit(0)
 
     # Current week = whichever week has the most games right now (mirrors
@@ -154,13 +143,12 @@ def main():
     weeks_present = sorted(set(g["week"] for g in all_games))
     week = weeks_present[-1]
     games = [g for g in all_games if g["week"] == week]
-    print(f"Fetching expert content for week {week} ({len(games)} games)")
+    print(f"Researching expert picks for week {week} ({len(games)} games)")
 
     items = []
     for g in games:
         print(f"  {g['away']} @ {g['home']}...")
-        snippets = gather_snippets(g, google_key, google_cx)
-        summary = summarize_with_claude(g, snippets, anthropic_key)
+        summary = research_game(g, anthropic_key)
         items.append(
             {
                 "gameId": g["gameId"],

@@ -52,19 +52,16 @@ is plenty for a season of CFB data), grab the REST URL and REST token.
   tier; this app uses ~2 credits per scheduled run, since it queries both the
   `us` and `us2` regions to cover Hard Rock and the reference book together).
   Used for both the Hard Rock line and the reference line.
-- **Google Custom Search JSON API** (for the Experts & News tab) — free tier
-  is 100 queries/day. Get an API key from Google Cloud Console, then create a
-  Programmable Search Engine at programmablesearchengine.google.com — when
-  setting it up, configure it to search the **entire web**, not specific
-  sites. You need both the API key and the search engine's ID (labeled `cx`
-  on its setup page).
-- **Anthropic API key** (also for Experts & News) — console.anthropic.com.
+- **Anthropic API key** (for the Experts & News tab) — console.anthropic.com.
   Unlike everything else in this project, **this one costs real money** —
-  it's a paid API. At the volumes here (~25 games/week, one Haiku call each)
-  it's cheap, but it's ongoing spend, not a free tier. Skip this and the
-  Google key above if you don't want the Experts & News tab; the rest of the
-  app works fine without them, just with a "no expert content generated
-  yet" state on that tab.
+  it's a paid API, and web search specifically is billed at $10 per 1,000
+  searches plus normal token costs. At the volumes here (~25 games/week,
+  capped at 6 searches each) that's modest but real ongoing spend. Skip
+  this if you don't want the Experts & News tab; the rest of the app works
+  fine without it, just with a "no expert content generated yet" state on
+  that tab. This is the only extra service needed for that tab — search
+  itself runs through Claude's own built-in web search tool, not a
+  separate search API.
 
 ## 4. Wire up GitHub Actions
 
@@ -75,8 +72,6 @@ In your repo's Settings → Secrets and variables → Actions:
 - `INGEST_TOKEN` — same value you set in Netlify
 - `CFBD_API_KEY`
 - `ODDS_API_KEY`
-- `GOOGLE_CSE_API_KEY` — only needed for Experts & News
-- `GOOGLE_CSE_ID` — only needed for Experts & News
 - `ANTHROPIC_API_KEY` — only needed for Experts & News
 
 **Variables:**
@@ -168,26 +163,30 @@ API already supports it.
 ## Experts & News tab — how it actually works, and its limits
 
 There's no API anywhere that hands you "here's what Chris Fallica, Sam
-Panayotovich, and Joel Klatt picked this week." This tab is built by
-searching the web for each Top 25 game (general news/injury queries, plus
-one query per named expert) via Google's Custom Search API, then having
-Claude read those search snippets and produce a short, paraphrased summary —
-citing a source link, and explicitly saying "no clear pick found" rather
-than guessing when the snippets don't clearly show one.
+Panayotovich, and Joel Klatt picked this week." This tab is built by giving
+Claude an actual research task per game — genuinely agentic, not a fixed
+pipeline: Claude decides what to search for, runs its own built-in web
+search tool as many times as it judges useful (capped at 6 per game), and
+only then produces a short paraphrased summary, citing a source link and
+explicitly saying "no clear pick found" rather than guessing when it
+doesn't find one. There's no separate search API in the loop — search runs
+server-side as part of the same Claude API call.
 
 **What this means in practice:**
 - It's only as good as what's publicly indexed and discoverable by search.
   Podcast-only or video-only picks without a written recap may not surface.
-- Search snippets are a partial window into a full article/video — treat
+- Search results are a partial window into a full article/video — treat
   the summary as a starting point to click through and verify, not a
   guaranteed-accurate transcript.
 - It updates once a week (Thursday). If an expert changes their pick later
   in the week, this won't catch that until the next run.
 - Cost: this is the one part of the whole project that costs real money per
-  run (the Anthropic API calls). Small at this volume, but not free.
+  run — both the web search tool itself ($10/1,000 searches) and normal
+  token costs. Small at this volume, but not free.
 
-If you ever want to adjust which experts it looks for, edit the `EXPERTS`
-list at the top of `scripts/fetch_expert_content.py`.
+If you ever want to adjust which experts it looks for, or how many searches
+it's allowed per game, edit `EXPERTS` / `MAX_SEARCHES_PER_GAME` at the top
+of `scripts/fetch_expert_content.py`.
 
 ## Notes / things to revisit once the season's rolling
 
