@@ -40,6 +40,7 @@ exports.handler = async (event) => {
 
     const githubToken = process.env.GITHUB_PAT;
     const repo = process.env.GITHUB_REPO; // e.g. "yourusername/cfb-betting-tracker"
+    const branch = process.env.GITHUB_BRANCH || "main"; // set GITHUB_BRANCH if your default branch isn't "main"
     if (!githubToken || !repo) {
       return json(500, { error: "GITHUB_PAT / GITHUB_REPO not configured in Netlify env vars" });
     }
@@ -54,7 +55,7 @@ exports.handler = async (event) => {
           "X-GitHub-Api-Version": "2022-11-28",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ ref: "main" }),
+        body: JSON.stringify({ ref: branch }),
       }
     );
 
