@@ -7,7 +7,7 @@ const API = "/api";
 // worst case is someone messing with your own bet log or triggering an
 // extra (rate-limited, server-side-capped) expert-picks run, but don't
 // treat this as real security. Don't share this site's URL publicly.
-const INGEST_TOKEN = "REPLACE_WITH_YOUR_INGEST_TOKEN";
+const INGEST_TOKEN = "838rfiuwefhiesufhsu8e";
 const AUTH_HEADERS = { "x-ingest-token": INGEST_TOKEN, "Content-Type": "application/json" };
 
 let state = { games: [], bets: [], lineMovement: [], valueComparison: [], record: {}, week: null, expertPicks: [] };
