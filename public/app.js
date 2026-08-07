@@ -31,6 +31,7 @@ async function loadDashboard() {
   renderRecordCards();
   renderGamesTable();
   renderMovementTable();
+  renderWeeklyResults();
   renderInsights();
 }
 
@@ -175,7 +176,7 @@ function renderGamesTable() {
         edgeHtml = `<span class="${cls} mono">${vc.edgePts > 0 ? "+" : ""}${vc.edgePts} pts</span>`;
       }
       const betCell = bet
-        ? `<span class="mono">${bet.side} @ ${bet.odds}</span>`
+        ? `<button class="btn-log btn-logged" data-gameid="${g.gameId}">${bet.side} @ ${bet.odds}</button>`
         : `<button class="btn-log" data-gameid="${g.gameId}">Log bet</button>`;
       const resultCell = bet && bet.result
         ? `<span class="pill ${bet.result}">${bet.result.toUpperCase()}</span>`
@@ -194,6 +195,9 @@ function renderGamesTable() {
     })
     .join("");
 
+  // Both "Log bet" (new) and the logged-bet button (edit/settle) open the
+  // same dialog -- openBetDialog looks up whether a bet already exists for
+  // this gameId and pre-fills accordingly.
   body.querySelectorAll(".btn-log").forEach((btn) => {
     btn.addEventListener("click", () => openBetDialog(btn.dataset.gameid));
   });
@@ -268,18 +272,51 @@ function renderInsights() {
     .join("");
 }
 
+function renderWeeklyResults() {
+  const body = document.getElementById("weeklyResultsBody");
+  const byWeek = (state.record && state.record.byWeek) || {};
+  const weeks = Object.keys(byWeek)
+    .filter((w) => w !== "unknown")
+    .map(Number)
+    .sort((a, b) => a - b);
+
+  if (!weeks.length) {
+    body.innerHTML = `<tr><td colspan="3" class="mono" style="color:var(--muted)">No settled bets yet.</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = weeks
+    .map((w) => {
+      const r = byWeek[w];
+      const decided = r.wins + r.losses;
+      const winPct = decided > 0 ? ((r.wins / decided) * 100).toFixed(1) + "%" : "—";
+      const cls = decided > 0 ? (r.wins / decided >= 0.5 ? "edge-favor" : "edge-against") : "";
+      return `<tr>
+        <td class="mono">Week ${w}</td>
+        <td class="mono">${r.wins}-${r.losses}-${r.pushes}</td>
+        <td class="mono ${cls}">${winPct}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
 function openBetDialog(gameId) {
   const dialog = document.getElementById("betDialog");
   const g = state.games.find((x) => x.gameId === gameId);
   const lm = state.lineMovement.find((m) => m.gameId === gameId);
   const hrCurrent = lm ? lm.hardrock.current : null; // this is always the HOME team's spread
+  const existing = state.bets.find((b) => b.gameId === gameId);
 
+  document.getElementById("betDialogTitle").textContent = existing ? "Edit Bet" : "Log Bet";
   document.getElementById("betGameId").value = gameId;
-  document.getElementById("betSide").value = "";
-  document.getElementById("betSpread").value = "";
-  document.getElementById("betOdds").value = -110;
-  document.getElementById("betStake").value = 100;
-  document.getElementById("betNotes").value = "";
+  document.getElementById("betSide").value = existing ? existing.side : "";
+  document.getElementById("betSpread").value = existing ? existing.spread : "";
+  document.getElementById("betOdds").value = existing ? existing.odds : -110;
+  document.getElementById("betStake").value = existing ? existing.stake : 100;
+  document.getElementById("betNotes").value = existing ? existing.notes || "" : "";
+  document.getElementById("betResult").value = existing && existing.result ? existing.result : "";
+  document.getElementById("betClosingLine").value = existing && existing.closingLine != null ? existing.closingLine : "";
+  document.getElementById("betDelete").style.display = existing ? "" : "none";
 
   const quickPickRow = document.getElementById("quickPickRow");
   quickPickRow.innerHTML = "";
@@ -294,12 +331,14 @@ function openBetDialog(gameId) {
       { team: g.home, spread: hrCurrent },
     ];
     picks.forEach((p) => {
+      const label = `${p.team} ${fmtSpread(p.spread)}`;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "quick-pick-btn";
-      btn.textContent = `${p.team} ${fmtSpread(p.spread)}`;
+      btn.textContent = label;
+      if (existing && existing.side === label) btn.classList.add("selected");
       btn.addEventListener("click", () => {
-        document.getElementById("betSide").value = `${p.team} ${fmtSpread(p.spread)}`;
+        document.getElementById("betSide").value = label;
         document.getElementById("betSpread").value = p.spread;
         quickPickRow.querySelectorAll(".quick-pick-btn").forEach((b) => b.classList.remove("selected"));
         btn.classList.add("selected");
@@ -315,9 +354,20 @@ document.getElementById("betCancel").addEventListener("click", () => {
   document.getElementById("betDialog").close();
 });
 
+document.getElementById("betDelete").addEventListener("click", async () => {
+  const gameId = document.getElementById("betGameId").value;
+  if (!confirm("Delete this bet? This can't be undone.")) return;
+  await fetch(`${API}/bets?gameId=${encodeURIComponent(gameId)}`, { method: "DELETE" });
+  document.getElementById("betDialog").close();
+  await loadDashboard();
+});
+
 document.getElementById("betForm").addEventListener("submit", async (e) => {
   const gameId = document.getElementById("betGameId").value;
   const g = state.games.find((x) => x.gameId === gameId);
+  const existing = state.bets.find((b) => b.gameId === gameId);
+  const resultVal = document.getElementById("betResult").value;
+  const closingLineVal = document.getElementById("betClosingLine").value;
   const bet = {
     gameId,
     week: g ? g.week : state.week,
@@ -326,10 +376,14 @@ document.getElementById("betForm").addEventListener("submit", async (e) => {
     odds: parseInt(document.getElementById("betOdds").value, 10),
     stake: parseFloat(document.getElementById("betStake").value),
     notes: document.getElementById("betNotes").value,
-    placedAt: new Date().toISOString(),
-    lineAtPlacement: state.lineMovement.find((m) => m.gameId === gameId)?.hardrock.current ?? null,
-    closingLine: null,
-    result: null,
+    // Keep the original placedAt/lineAtPlacement when editing -- these
+    // describe when/where you bet, not when you're settling the result.
+    placedAt: existing ? existing.placedAt : new Date().toISOString(),
+    lineAtPlacement: existing
+      ? existing.lineAtPlacement
+      : state.lineMovement.find((m) => m.gameId === gameId)?.hardrock.current ?? null,
+    closingLine: closingLineVal !== "" ? parseFloat(closingLineVal) : null,
+    result: resultVal || null,
   };
   await fetch(`${API}/bets`, { method: "POST", body: JSON.stringify(bet) });
   await loadDashboard();

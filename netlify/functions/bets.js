@@ -1,7 +1,10 @@
 const { getRedis, json, requireAuth } = require("./_redis");
 
 // GET   /api/bets                 -> all bets
-// POST  /api/bets                 -> create/update a bet. Body: bet object (see shape below)
+// POST  /api/bets                 -> create or update a bet. Body: partial or full bet object (see shape below).
+//                                     Merges onto any existing bet with the same gameId -- so settling a bet
+//                                     (e.g. { gameId, result: "win", closingLine: -5.5 }) doesn't clobber the
+//                                     side/spread/odds/stake you originally logged.
 // DELETE /api/bets?gameId=xxx     -> remove a bet
 //
 // Bet shape:
@@ -31,11 +34,13 @@ exports.handler = async (event) => {
 
     if (event.httpMethod === "POST") {
       if (!requireAuth(event)) return json(401, { error: "unauthorized" });
-      const bet = JSON.parse(event.body || "{}");
-      if (!bet.gameId) return json(400, { error: "gameId required" });
-      await redis.set(`bet:${bet.gameId}`, bet);
-      await redis.sadd("bets:all", bet.gameId);
-      return json(200, { saved: bet.gameId });
+      const incoming = JSON.parse(event.body || "{}");
+      if (!incoming.gameId) return json(400, { error: "gameId required" });
+      const existing = await redis.get(`bet:${incoming.gameId}`);
+      const merged = existing ? { ...existing, ...incoming } : incoming;
+      await redis.set(`bet:${incoming.gameId}`, merged);
+      await redis.sadd("bets:all", incoming.gameId);
+      return json(200, { saved: incoming.gameId });
     }
 
     if (event.httpMethod === "DELETE") {

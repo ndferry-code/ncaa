@@ -77,6 +77,25 @@
 
     <section class="panel">
       <div class="panel-head">
+        <h2>Weekly Results</h2>
+        <span class="panel-note">Every week's record and win %, season-wide regardless of the filter above.</span>
+      </div>
+      <div class="table-scroll">
+        <table id="weeklyResultsTable">
+          <thead>
+            <tr>
+              <th>Week</th>
+              <th>Record</th>
+              <th>Win %</th>
+            </tr>
+          </thead>
+          <tbody id="weeklyResultsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
         <h2>Season Trends</h2>
         <span class="panel-note">Auto-generated from your settled bets.</span>
       </div>
@@ -106,7 +125,21 @@
       <label>Notes
         <textarea id="betNotes" rows="2" placeholder="Why you made this bet"></textarea>
       </label>
+      <div class="settle-section" id="settleSection">
+        <label>Result
+          <select id="betResult">
+            <option value="">Pending</option>
+            <option value="win">Win</option>
+            <option value="loss">Loss</option>
+            <option value="push">Push</option>
+          </select>
+        </label>
+        <label>Closing Line <span class="field-hint">(optional, for CLV)</span>
+          <input type="number" step="0.5" id="betClosingLine" placeholder="e.g. -5.5" />
+        </label>
+      </div>
       <div class="form-actions">
+        <button type="button" id="betDelete" class="btn-ghost btn-danger" style="display:none">Delete Bet</button>
         <button type="button" id="betCancel" class="btn-ghost">Cancel</button>
         <button type="submit" id="betSave" class="btn-primary">Save Bet</button>
       </div>
