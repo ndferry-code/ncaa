@@ -62,6 +62,13 @@ is plenty for a season of CFB data), grab the REST URL and REST token.
   that tab. This is the only extra service needed for that tab — search
   itself runs through Claude's own built-in web search tool, not a
   separate search API.
+- **GitHub fine-grained Personal Access Token** (only if you want the
+  "Refresh Now" button on the Experts & News tab — the schedule works fine
+  without it). GitHub → Settings → Developer settings → Personal access
+  tokens → Fine-grained tokens → Generate new token. Restrict it to just
+  this repo ("Only select repositories"), and under Repository permissions
+  set **Actions: Read and write** (this specific permission — Contents
+  alone isn't enough). Copy the token — you won't see it again.
 
 ## 4. Wire up GitHub Actions
 
@@ -77,14 +84,46 @@ In your repo's Settings → Secrets and variables → Actions:
 **Variables:**
 - `SEASON_YEAR` — e.g. `2026`
 
-The workflow (`.github/workflows/update-lines.yml`) fetches lines every 3
-hours Mon–Sat, reseeds the week's Top 25 games every Monday, and pulls
-expert picks/news every Thursday. The current week is auto-detected from
-actual game kickoff times — nothing to update by hand. Adjust the cron
-schedules to match how often you actually want snapshots — more often near
-kickoff if you want tighter CLV tracking.
+Two workflow files:
+- `.github/workflows/update-lines.yml` — fetches lines every 3 hours
+  Mon–Sat, reseeds the week's Top 25 games every Monday. The current week
+  is auto-detected from actual game kickoff times — nothing to update by
+  hand. Adjust the cron schedules to match how often you actually want
+  snapshots — more often near kickoff if you want tighter CLV tracking.
+- `.github/workflows/expert-picks.yml` — pulls expert picks/news every
+  Wednesday. Kept as its own workflow (rather than a job in the one above)
+  specifically so the site's "Refresh Now" button (next section) can
+  trigger just this, without also re-running the lines/games jobs.
 
-## 5. Sanity-check the Hard Rock match
+## 5. Set up the "Refresh Now" button (optional)
+
+This lets you manually re-trigger the Experts & News research from the site
+itself, instead of waiting for Wednesday or going into GitHub's Actions tab.
+Skip this section if the weekly schedule is enough for you.
+
+In **Netlify** (Site settings → Environment variables), add:
+- `GITHUB_PAT` — the fine-grained personal access token from step 3 (Actions:
+  Read and write, scoped to just this repo)
+- `GITHUB_REPO` — `yourusername/your-repo-name`
+
+Then open `public/app.js` and replace the placeholder:
+```js
+const INGEST_TOKEN = "REPLACE_WITH_YOUR_INGEST_TOKEN";
+```
+with your actual `INGEST_TOKEN` value (same one everywhere else). This is
+what lets the button (and bet logging — see the note below) authenticate
+its requests. **Be aware this puts the token in your site's public JS
+source** — anyone who views page source can see it. For a personal tool
+that's a reasonable tradeoff (worst case: someone messes with your bet log,
+or triggers an extra expert-picks run, which is separately rate-limited to
+once per 15 minutes server-side regardless of the token). Just don't share
+this site's URL publicly.
+
+(This same token/header was actually missing from bet logging before now —
+if you've been wondering why "Save Bet" didn't seem to do anything, that
+was it. Fixed as part of adding this.)
+
+## 6. Sanity-check the Hard Rock match
 
 The first time `fetch_lines.py` runs, it prints which bookmaker it matched as
 "Hard Rock" (e.g. `key='hardrockbet' title='Hard Rock Bet (FL)'`). Check that
@@ -96,7 +135,7 @@ one, adjust `find_hardrock_book()` in `scripts/fetch_lines.py`.
 Trigger a manual run from the Actions tab (`workflow_dispatch`) to see this
 without waiting for the next scheduled run.
 
-## 6. Seed your first week of games
+## 7. Seed your first week of games
 
 Once secrets are set:
 
@@ -149,7 +188,7 @@ curl -X DELETE "https://your-site.netlify.app/api/games?week=0" \
   -H "x-ingest-token: YOUR_INGEST_TOKEN"
 ```
 
-## 7. Use it
+## 8. Use it
 
 Open your Netlify URL. Pick the week, click "Log bet" on any game to record
 your side/spread/odds/stake. The dashboard fills in line movement, Hard
@@ -178,11 +217,15 @@ server-side as part of the same Claude API call.
 - Search results are a partial window into a full article/video — treat
   the summary as a starting point to click through and verify, not a
   guaranteed-accurate transcript.
-- It updates once a week (Thursday). If an expert changes their pick later
-  in the week, this won't catch that until the next run.
+- It updates once a week (Wednesday), or on demand via the "Refresh Now"
+  button on the site if you've set that up (see step 5). If an expert
+  changes their pick later in the week, this won't catch that until the
+  next run.
 - Cost: this is the one part of the whole project that costs real money per
   run — both the web search tool itself ($10/1,000 searches) and normal
-  token costs. Small at this volume, but not free.
+  token costs. Small at this volume, but not free. This is also why
+  "Refresh Now" is rate-limited to once per 15 minutes server-side — it's
+  a real cost every time it runs, triggered manually or not.
 
 If you ever want to adjust which experts it looks for, or how many searches
 it's allowed per game, edit `EXPERTS` / `MAX_SEARCHES_PER_GAME` at the top

@@ -1,5 +1,15 @@
 const API = "/api";
 
+// This has to match the INGEST_TOKEN you set in Netlify's env vars and
+// GitHub secrets, since bets.js / trigger-expert-picks.js require it on
+// every write. Yes, this means it's visible to anyone who views this
+// page's source -- acceptable for a personal single-user tool where the
+// worst case is someone messing with your own bet log or triggering an
+// extra (rate-limited, server-side-capped) expert-picks run, but don't
+// treat this as real security. Don't share this site's URL publicly.
+const INGEST_TOKEN = "REPLACE_WITH_YOUR_INGEST_TOKEN";
+const AUTH_HEADERS = { "x-ingest-token": INGEST_TOKEN, "Content-Type": "application/json" };
+
 let state = { games: [], bets: [], lineMovement: [], valueComparison: [], record: {}, week: null, expertPicks: [] };
 let expertsLoadedForWeek = null;
 
@@ -35,6 +45,41 @@ function initTabs() {
   });
 }
 
+function showExpertsStatus(message, kind) {
+  const el = document.getElementById("expertsStatus");
+  el.textContent = message;
+  el.className = `experts-status ${kind}`;
+  el.style.display = "";
+}
+
+function initRefreshExpertsButton() {
+  const btn = document.getElementById("refreshExpertsBtn");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = "Triggering…";
+    try {
+      const res = await fetch(`${API}/trigger-expert-picks`, { method: "POST", headers: AUTH_HEADERS });
+      const data = await res.json();
+      if (res.ok) {
+        showExpertsStatus(
+          "Triggered. This takes a few minutes (one search per game, done one at a time) -- check back and switch tabs or reload to see new results once it's done.",
+          "info"
+        );
+      } else if (res.status === 429) {
+        showExpertsStatus(data.error || "Triggered too recently -- try again shortly.", "error");
+      } else {
+        showExpertsStatus(`Couldn't trigger: ${data.error || res.status}`, "error");
+      }
+    } catch (err) {
+      showExpertsStatus(`Couldn't trigger: ${err.message}`, "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
+}
+
 async function loadExperts() {
   // Cache per week within a session -- this data only refreshes weekly on
   // the backend anyway, no need to refetch every tab click.
@@ -54,7 +99,7 @@ async function loadExperts() {
 function renderExperts() {
   const grid = document.getElementById("expertsGrid");
   if (!state.expertPicks.length) {
-    grid.innerHTML = `<div class="breakeven-empty-text" style="padding:20px">No expert content generated for this week yet -- it's pulled in automatically each Thursday.</div>`;
+    grid.innerHTML = `<div class="breakeven-empty-text" style="padding:20px">No expert content generated for this week yet -- it's pulled in automatically each Wednesday, or tap "Refresh Now" above to trigger it early.</div>`;
     return;
   }
   grid.innerHTML = state.expertPicks
@@ -430,7 +475,7 @@ document.getElementById("betCancel").addEventListener("click", () => {
 document.getElementById("betDelete").addEventListener("click", async () => {
   const gameId = document.getElementById("betGameId").value;
   if (!confirm("Delete this bet? This can't be undone.")) return;
-  await fetch(`${API}/bets?gameId=${encodeURIComponent(gameId)}`, { method: "DELETE" });
+  await fetch(`${API}/bets?gameId=${encodeURIComponent(gameId)}`, { method: "DELETE", headers: AUTH_HEADERS });
   document.getElementById("betDialog").close();
   await loadDashboard();
 });
@@ -458,12 +503,13 @@ document.getElementById("betForm").addEventListener("submit", async (e) => {
     closingLine: closingLineVal !== "" ? parseFloat(closingLineVal) : null,
     result: resultVal || null,
   };
-  await fetch(`${API}/bets`, { method: "POST", body: JSON.stringify(bet) });
+  await fetch(`${API}/bets`, { method: "POST", headers: AUTH_HEADERS, body: JSON.stringify(bet) });
   await loadDashboard();
 });
 
 (async function init() {
   initTabs();
+  initRefreshExpertsButton();
   await loadWeeks();
   await loadDashboard();
 })();

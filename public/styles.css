@@ -505,3 +505,12 @@ dialog input, dialog textarea, dialog select {
   margin-top: 10px;
   text-align: right;
 }
+.experts-status {
+  margin: 0 20px 14px;
+  padding: 10px 14px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+.experts-status.info { background: rgba(232, 163, 61, 0.12); color: var(--gold); }
+.experts-status.error { background: rgba(209, 73, 91, 0.12); color: var(--red); }
