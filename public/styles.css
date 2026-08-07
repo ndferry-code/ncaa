@@ -70,6 +70,29 @@ body {
   font-size: 13px;
 }
 
+.tab-nav {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 20px;
+  display: flex;
+  gap: 4px;
+}
+.tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--turf); border-bottom-color: var(--turf); }
+
 /* Scoreboard ticker for biggest movers */
 .ticker {
   background: #0d0f13;
@@ -415,4 +438,70 @@ dialog input, dialog textarea, dialog select {
   background: rgba(63, 163, 77, 0.15);
   color: var(--turf);
   font-weight: 700;
+}
+
+/* Experts & News tab */
+.experts-grid {
+  padding: 18px 20px;
+  display: grid;
+  gap: 16px;
+}
+.expert-card {
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px 18px;
+}
+.expert-card-header {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.expert-news {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.expert-news.empty { color: var(--muted); font-style: italic; }
+.expert-pick-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  flex-wrap: wrap;
+}
+.expert-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 130px;
+}
+.expert-lean {
+  font-weight: 700;
+  color: var(--turf);
+  font-size: 13px;
+}
+.expert-lean.none { color: var(--muted); font-weight: 400; font-style: italic; }
+.expert-note {
+  font-size: 12px;
+  color: var(--text);
+  flex: 1;
+}
+.expert-source {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--gold);
+  text-decoration: none;
+}
+.expert-source:hover { text-decoration: underline; }
+.expert-generated {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 10px;
+  text-align: right;
 }

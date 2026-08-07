@@ -1,6 +1,7 @@
 const API = "/api";
 
-let state = { games: [], bets: [], lineMovement: [], valueComparison: [], record: {}, week: null };
+let state = { games: [], bets: [], lineMovement: [], valueComparison: [], record: {}, week: null, expertPicks: [] };
+let expertsLoadedForWeek = null;
 
 async function loadWeeks() {
   const res = await fetch(`${API}/games`);
@@ -16,7 +17,79 @@ async function loadWeeks() {
   select.addEventListener("change", () => {
     state.week = Number(select.value);
     loadDashboard();
+    if (document.getElementById("tabExperts").style.display !== "none") loadExperts();
   });
+}
+
+function initTabs() {
+  const buttons = document.querySelectorAll(".tab-btn");
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      buttons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const tab = btn.dataset.tab;
+      document.getElementById("tabDashboard").style.display = tab === "dashboard" ? "" : "none";
+      document.getElementById("tabExperts").style.display = tab === "experts" ? "" : "none";
+      if (tab === "experts") loadExperts();
+    });
+  });
+}
+
+async function loadExperts() {
+  // Cache per week within a session -- this data only refreshes weekly on
+  // the backend anyway, no need to refetch every tab click.
+  if (expertsLoadedForWeek === state.week && state.expertPicks.length) {
+    renderExperts();
+    return;
+  }
+  const grid = document.getElementById("expertsGrid");
+  grid.innerHTML = `<div class="breakeven-empty-text" style="padding:20px">Loading…</div>`;
+  const res = await fetch(`${API}/expert-picks?week=${state.week}`);
+  const data = await res.json();
+  state.expertPicks = data.picks || [];
+  expertsLoadedForWeek = state.week;
+  renderExperts();
+}
+
+function renderExperts() {
+  const grid = document.getElementById("expertsGrid");
+  if (!state.expertPicks.length) {
+    grid.innerHTML = `<div class="breakeven-empty-text" style="padding:20px">No expert content generated for this week yet -- it's pulled in automatically each Thursday.</div>`;
+    return;
+  }
+  grid.innerHTML = state.expertPicks
+    .map((item) => {
+      const g = state.games.find((x) => x.gameId === item.gameId);
+      const header = g ? gameLabel(g) : item.gameId;
+      const newsHtml = item.newsSummary
+        ? `<div class="expert-news">${item.newsSummary}</div>`
+        : `<div class="expert-news empty">No notable news found this week.</div>`;
+      const picksHtml = (item.picks || [])
+        .map((p) => {
+          const lean = p.leaning
+            ? `<span class="expert-lean">${p.leaning}</span>`
+            : `<span class="expert-lean none">no clear pick found</span>`;
+          const note = p.note ? `<span class="expert-note">${p.note}</span>` : "";
+          const source = p.sourceUrl ? `<a class="expert-source" href="${p.sourceUrl}" target="_blank" rel="noopener">source</a>` : "";
+          return `<div class="expert-pick-row">
+            <span class="expert-name">${p.expert}</span>
+            ${lean}
+            ${note}
+            ${source}
+          </div>`;
+        })
+        .join("");
+      const generated = item.generatedAt
+        ? `<div class="expert-generated">Updated ${new Date(item.generatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</div>`
+        : "";
+      return `<div class="expert-card">
+        <div class="expert-card-header">${header}</div>
+        ${newsHtml}
+        ${picksHtml}
+        ${generated}
+      </div>`;
+    })
+    .join("");
 }
 
 async function loadDashboard() {
@@ -390,6 +463,7 @@ document.getElementById("betForm").addEventListener("submit", async (e) => {
 });
 
 (async function init() {
+  initTabs();
   await loadWeeks();
   await loadDashboard();
 })();

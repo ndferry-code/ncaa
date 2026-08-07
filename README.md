@@ -44,7 +44,7 @@ is plenty for a season of CFB data), grab the REST URL and REST token.
 4. Deploy. Your site URL (e.g. `https://cfb-tracker-nick.netlify.app`) is
    what you'll use as `APP_URL` everywhere below.
 
-## 3. Get your two free API keys
+## 3. Get your API keys
 
 - **CollegeFootballData.com** — free key at collegefootballdata.com/key.
   Used once a week to pull the AP Top 25 and that week's schedule.
@@ -52,6 +52,19 @@ is plenty for a season of CFB data), grab the REST URL and REST token.
   tier; this app uses ~2 credits per scheduled run, since it queries both the
   `us` and `us2` regions to cover Hard Rock and the reference book together).
   Used for both the Hard Rock line and the reference line.
+- **Google Custom Search JSON API** (for the Experts & News tab) — free tier
+  is 100 queries/day. Get an API key from Google Cloud Console, then create a
+  Programmable Search Engine at programmablesearchengine.google.com — when
+  setting it up, configure it to search the **entire web**, not specific
+  sites. You need both the API key and the search engine's ID (labeled `cx`
+  on its setup page).
+- **Anthropic API key** (also for Experts & News) — console.anthropic.com.
+  Unlike everything else in this project, **this one costs real money** —
+  it's a paid API. At the volumes here (~25 games/week, one Haiku call each)
+  it's cheap, but it's ongoing spend, not a free tier. Skip this and the
+  Google key above if you don't want the Experts & News tab; the rest of the
+  app works fine without them, just with a "no expert content generated
+  yet" state on that tab.
 
 ## 4. Wire up GitHub Actions
 
@@ -62,15 +75,19 @@ In your repo's Settings → Secrets and variables → Actions:
 - `INGEST_TOKEN` — same value you set in Netlify
 - `CFBD_API_KEY`
 - `ODDS_API_KEY`
+- `GOOGLE_CSE_API_KEY` — only needed for Experts & News
+- `GOOGLE_CSE_ID` — only needed for Experts & News
+- `ANTHROPIC_API_KEY` — only needed for Experts & News
 
 **Variables:**
 - `SEASON_YEAR` — e.g. `2026`
 
 The workflow (`.github/workflows/update-lines.yml`) fetches lines every 3
-hours Mon–Sat, and reseeds the week's Top 25 + notable games every Monday.
-The current week is auto-detected from CFBD's `/calendar` endpoint — nothing
-to update by hand. Adjust the cron schedules to match how often you actually
-want snapshots — more often near kickoff if you want tighter CLV tracking.
+hours Mon–Sat, reseeds the week's Top 25 games every Monday, and pulls
+expert picks/news every Thursday. The current week is auto-detected from
+actual game kickoff times — nothing to update by hand. Adjust the cron
+schedules to match how often you actually want snapshots — more often near
+kickoff if you want tighter CLV tracking.
 
 ## 5. Sanity-check the Hard Rock match
 
@@ -147,6 +164,30 @@ To settle a bet after a game, `POST` to `/api/bets` with the same `gameId`
 and add `result: "win" | "loss" | "push"` and `closingLine` — worth wiring a
 tiny settle form into the UI later if logging results by hand gets old; the
 API already supports it.
+
+## Experts & News tab — how it actually works, and its limits
+
+There's no API anywhere that hands you "here's what Chris Fallica, Sam
+Panayotovich, and Joel Klatt picked this week." This tab is built by
+searching the web for each Top 25 game (general news/injury queries, plus
+one query per named expert) via Google's Custom Search API, then having
+Claude read those search snippets and produce a short, paraphrased summary —
+citing a source link, and explicitly saying "no clear pick found" rather
+than guessing when the snippets don't clearly show one.
+
+**What this means in practice:**
+- It's only as good as what's publicly indexed and discoverable by search.
+  Podcast-only or video-only picks without a written recap may not surface.
+- Search snippets are a partial window into a full article/video — treat
+  the summary as a starting point to click through and verify, not a
+  guaranteed-accurate transcript.
+- It updates once a week (Thursday). If an expert changes their pick later
+  in the week, this won't catch that until the next run.
+- Cost: this is the one part of the whole project that costs real money per
+  run (the Anthropic API calls). Small at this volume, but not free.
+
+If you ever want to adjust which experts it looks for, edit the `EXPERTS`
+list at the top of `scripts/fetch_expert_content.py`.
 
 ## Notes / things to revisit once the season's rolling
 

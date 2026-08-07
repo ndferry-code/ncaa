@@ -20,6 +20,10 @@
         <select id="weekSelect"></select>
       </div>
     </div>
+    <nav class="tab-nav">
+      <button class="tab-btn active" id="tabBtnDashboard" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" id="tabBtnExperts" data-tab="experts">Experts & News</button>
+    </nav>
   </header>
 
   <section class="ticker" id="ticker" aria-label="Biggest line movers">
@@ -27,6 +31,7 @@
   </section>
 
   <main class="wrap">
+    <div id="tabDashboard">
     <section class="breakeven-hero" id="breakevenHero"></section>
 
     <section class="scoreboard-row" id="recordCards"></section>
@@ -101,6 +106,17 @@
       </div>
       <div class="insights-grid" id="insightsGrid"></div>
     </section>
+    </div>
+
+    <div id="tabExperts" style="display:none">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Experts &amp; News</h2>
+          <span class="panel-note">AI-summarized from web search for this week's Top 25 games &mdash; sourced, and explicit when no clear pick was found. Treat as a starting point, not a transcript.</span>
+        </div>
+        <div id="expertsGrid" class="experts-grid"></div>
+      </section>
+    </div>
   </main>
 
   <dialog id="betDialog">
