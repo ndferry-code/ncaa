@@ -1,0 +1,36 @@
+name: Fetch expert picks
+
+on:
+  schedule:
+    # Wednesday 15:00 UTC (~11am ET) -- picks and injury reports are
+    # generally more settled mid-week, and this leaves it well ahead of
+    # Saturday kickoffs. Games for the week are already seeded by Monday's
+    # run in update-lines.yml, so no explicit dependency needed here --
+    # just timing.
+    - cron: "0 15 * * 3"
+  workflow_dispatch: {}   # lets you trigger a run manually -- from the Actions
+                          # tab, or via the "Refresh Now" button on the site's
+                          # Experts & News tab (see netlify/functions/trigger-expert-picks.js)
+
+# Only one run active at a time -- same reasoning as update-lines.yml. This
+# also means clicking "Refresh Now" on the site while a run is already in
+# flight cancels the old one and starts fresh, rather than queuing up.
+concurrency:
+  group: fetch-expert-picks
+  cancel-in-progress: true
+
+jobs:
+  fetch-expert-picks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r scripts/requirements.txt
+      - name: Fetch expert picks and news
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APP_URL: ${{ secrets.APP_URL }}
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+        run: python scripts/fetch_expert_content.py
