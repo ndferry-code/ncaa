@@ -153,9 +153,13 @@ exports.handler = async (event) => {
       }
     }
 
-    // Flag the biggest movers (top 3 by absolute point movement)
+    // Flag the biggest movers (top 3 by absolute point movement). Zero
+    // counts as "no movement," same rule the Line Movement table applies --
+    // without this, a game sitting at its opening number could still get
+    // flagged as a "mover" and show up in the ticker at the top, which
+    // looked inconsistent with an otherwise-empty Line Movement table below.
     const sortedByMovement = [...lineMovement]
-      .filter((m) => m.hardrock.deltaPts != null)
+      .filter((m) => m.hardrock.deltaPts != null && m.hardrock.deltaPts !== 0)
       .sort((a, b) => Math.abs(b.hardrock.deltaPts) - Math.abs(a.hardrock.deltaPts));
     const biggestMoverIds = new Set(sortedByMovement.slice(0, 3).map((m) => m.gameId));
     lineMovement.forEach((m) => (m.biggestMover = biggestMoverIds.has(m.gameId)));
