@@ -222,7 +222,12 @@ def main():
         if ref_book:
             reference_book_seen = ref_book["key"]
 
-        commence_time = ev.get("commence_time")
+        # NOTE: intentionally not passing a "ts" here -- commence_time (the
+        # game's kickoff time) used to get passed as the snapshot timestamp
+        # by mistake, which meant every snapshot for a given game showed the
+        # same "recorded at" time regardless of when this script actually
+        # ran. Omitting it lets lines-ingest.js default to the real current
+        # time, which is what "when was this line seen" should mean.
 
         if hr_book:
             spreads_market = next((m for m in hr_book.get("markets", []) if m["key"] == "spreads"), None)
@@ -230,7 +235,7 @@ def main():
                 outcome = spread_for_home(spreads_market, home)
                 if outcome:
                     hardrock_snapshots.append(
-                        {"gameId": game_id, "spread": outcome["point"], "odds": outcome.get("price"), "ts": commence_time}
+                        {"gameId": game_id, "spread": outcome["point"], "odds": outcome.get("price")}
                     )
 
         if ref_book:
@@ -239,7 +244,7 @@ def main():
                 outcome = spread_for_home(spreads_market, home)
                 if outcome:
                     reference_snapshots.append(
-                        {"gameId": game_id, "spread": outcome["point"], "odds": outcome.get("price"), "ts": commence_time}
+                        {"gameId": game_id, "spread": outcome["point"], "odds": outcome.get("price")}
                     )
 
     if hardrock_snapshots:
