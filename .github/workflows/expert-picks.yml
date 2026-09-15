@@ -4,9 +4,9 @@ on:
   schedule:
     # Wednesday 15:00 UTC (~11am ET) -- picks and injury reports are
     # generally more settled mid-week, and this leaves it well ahead of
-    # Saturday kickoffs. Games for the week are already seeded by Monday's
-    # run in update-lines.yml, so no explicit dependency needed here --
-    # just timing.
+    # Saturday kickoffs. Games for the week are already seeded by Sunday
+    # afternoon's run in update-lines.yml, so no explicit dependency needed
+    # here -- just timing.
     - cron: "0 15 * * 3"
   workflow_dispatch: {}   # lets you trigger a run manually -- from the Actions
                           # tab, or via the "Refresh Now" button on the site's
