@@ -15,9 +15,9 @@ Run manually:
 --week is optional. If you omit it, the script derives each week's date
 window from actual game kickoff times (see get_season_weeks()) and picks
 whichever week we're currently inside. If we're between weeks (the normal
-state for the Monday reseed -- last week's games are over, this week's
-haven't started), it picks the upcoming week, not the one that just ended.
-That's what the GitHub Actions workflow does every Monday -- no
+state for the Sunday-afternoon reseed -- last week's games are over, this
+week's haven't started), it picks the upcoming week, not the one that just
+ended. That's what the GitHub Actions workflow does every Sunday -- no
 CURRENT_WEEK variable to maintain.
 
 Ranked/notable filtering always applies -- there's no more "Week 0 gets
@@ -99,11 +99,11 @@ def get_season_weeks(year, api_key):
 def get_current_week(weeks):
     """
     Given get_season_weeks() output, picks whichever week "now" falls
-    into. If we're between weeks -- the common case for the Monday reseed,
-    which runs specifically to get ahead of the upcoming week -- prefers
-    the NEXT week that hasn't started yet, not the one that just finished.
-    Falls back to the most recently started week only if there's no future
-    week at all (e.g. past the end of the season).
+    into. If we're between weeks -- the common case for the Sunday-afternoon
+    reseed, which runs specifically to get ahead of the upcoming week --
+    prefers the NEXT week that hasn't started yet, not the one that just
+    finished. Falls back to the most recently started week only if there's
+    no future week at all (e.g. past the end of the season).
     """
     now = datetime.now(timezone.utc)
 
@@ -116,9 +116,9 @@ def get_current_week(weeks):
             return w["week"]
 
     # Between weeks -- prefer the soonest upcoming week over the one that
-    # just ended. This is the fix for the Monday-morning gap: Week 1 has
-    # ended, Week 2's games haven't started yet, and the whole point of the
-    # Monday reseed is to get Week 2 in place before its games begin.
+    # just ended. This is the fix for the Sunday-afternoon gap: this week
+    # has ended, next week's games haven't started yet, and the whole point
+    # of the reseed is to get the new week in place before its games begin.
     upcoming = [w for w in weeks if w["start"] > now]
     if upcoming:
         return min(upcoming, key=lambda w: w["start"])["week"]
