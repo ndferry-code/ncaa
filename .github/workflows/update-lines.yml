@@ -5,14 +5,18 @@ on:
     # Line updates: every 3 hours, Mon-Sat (UTC). Adjust to taste -- lines
     # move most Sun night/Mon (open) and Thu-Sat (close).
     - cron: "0 */3 * * 1-6"
-    # Weekly seed: Monday 13:00 UTC (~9am ET), after the new AP poll and
-    # schedule are out. This is its own schedule entry specifically so the
-    # seed-games job below can identify it and only run then.
-    - cron: "0 13 * * 1"
+    # Weekly seed: Sunday 19:00 UTC (~3pm ET). The AP Top 25 releases around
+    # 2pm ET Sundays (Coaches Poll ~1pm ET), sometimes running 15-30 min
+    # late -- this leaves a real buffer so the reseed reliably picks up the
+    # fresh poll instead of the previous week's. This is its own schedule
+    # entry specifically so the seed-games job below can identify it and
+    # only run then.
+    - cron: "0 19 * * 0"
     # Settle bets: Sunday 17:00 UTC (~1pm ET), well after Saturday's games
-    # (including primetime) have finished and CFBD has posted final scores.
-    # Also runs again on the Monday cron above as a catch-all for any
-    # Sun/Mon games CFBD hadn't finalized yet by Sunday afternoon.
+    # (including primetime) have finished and CFBD has posted final scores,
+    # and before the reseed above -- closes out the finishing week before
+    # opening the next one. Also runs again alongside the reseed as a
+    # catch-all for any late-finalizing scores.
     - cron: "0 17 * * 0"
   workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab
 
@@ -27,8 +31,8 @@ concurrency:
 
 jobs:
   seed-games:
-    # Runs only on the Monday cron above, or when triggered manually.
-    if: github.event.schedule == '0 13 * * 1' || github.event_name == 'workflow_dispatch'
+    # Runs only on the Sunday reseed cron above, or when triggered manually.
+    if: github.event.schedule == '0 19 * * 0' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,12 +52,10 @@ jobs:
 
   fetch-lines:
     # Explicitly waits for seed-games, even on runs where seed-games gets
-    # skipped by its own `if:` (non-Monday cron -- a skipped dependency still
-    # counts as satisfied). Without this, GitHub runs both jobs in parallel,
-    # which on a manual trigger can race against seed-games mid-reseed and
-    # fetch lines against gameIds that are about to change (this bit Week 0
-    # specifically, since its IDs get freshly rewritten by the opening-batch
-    # split logic on every seed run).
+    # skipped by its own `if:` (a skipped dependency still counts as
+    # satisfied). Without this, GitHub runs both jobs in parallel, which on
+    # a manual trigger can race against seed-games mid-reseed and fetch
+    # lines against gameIds that are about to change.
     needs: seed-games
     runs-on: ubuntu-latest
     steps:
@@ -71,11 +73,11 @@ jobs:
         run: python scripts/fetch_lines.py
 
   settle-bets:
-    # Runs on the Sunday cron, the Monday cron (catch-all), or when
-    # triggered manually. Independent of seed-games/fetch-lines -- it only
-    # reads existing bets/games plus CFBD's final scores, so there's no
-    # ordering dependency either way.
-    if: github.event.schedule == '0 17 * * 0' || github.event.schedule == '0 13 * * 1' || github.event_name == 'workflow_dispatch'
+    # Runs on either Sunday cron above (settle time itself, or alongside
+    # the reseed as a catch-all), or when triggered manually. Independent
+    # of seed-games/fetch-lines -- it only reads existing bets/games plus
+    # CFBD's final scores, so there's no ordering dependency either way.
+    if: github.event.schedule == '0 17 * * 0' || github.event.schedule == '0 19 * * 0' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
