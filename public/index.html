@@ -38,6 +38,61 @@
 
     <section class="panel">
       <div class="panel-head">
+        <h2>Log a Bet</h2>
+        <span class="panel-note">Over/unders, props, parlays, or anything else already decided &mdash; enter it once you know the odds, wager, and result.</span>
+      </div>
+      <form id="adhocBetForm" class="adhoc-bet-form">
+        <input type="hidden" id="adhocBetId" />
+        <label class="grow">Description
+          <input type="text" id="adhocLabel" placeholder="e.g. Georgia/Alabama Over 54.5" required />
+        </label>
+        <label>Type
+          <select id="adhocType">
+            <option value="spread">Spread</option>
+            <option value="total">Total (O/U)</option>
+            <option value="moneyline">Moneyline</option>
+            <option value="other">Other / Prop</option>
+          </select>
+        </label>
+        <label>Odds
+          <input type="number" step="1" id="adhocOdds" value="-110" required />
+        </label>
+        <label>Wager
+          <input type="number" step="1" id="adhocStake" value="100" required />
+        </label>
+        <label>Result
+          <select id="adhocResult">
+            <option value="">Pending</option>
+            <option value="win">Win</option>
+            <option value="loss">Loss</option>
+            <option value="push">Push</option>
+          </select>
+        </label>
+        <div class="form-actions">
+          <button type="button" id="adhocCancel" class="btn-ghost" style="display:none">Cancel</button>
+          <button type="submit" id="adhocSave" class="btn-primary">Add Bet</button>
+        </div>
+      </form>
+      <div class="table-scroll">
+        <table id="allBetsTable">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Description</th>
+              <th>Type</th>
+              <th>Odds</th>
+              <th>Wager</th>
+              <th>Result</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="allBetsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
         <h2>This Week's Slate</h2>
         <span class="panel-note">Top 25 matchups. Tap "Log bet", then tap the team you took &mdash; no typing needed.</span>
       </div>
@@ -125,6 +180,7 @@
     <form id="betForm" method="dialog">
       <h3 id="betDialogTitle">Log Bet</h3>
       <input type="hidden" id="betGameId" />
+      <input type="hidden" id="betId" />
       <div class="quick-pick-row" id="quickPickRow"></div>
       <label>Side
         <input type="text" id="betSide" placeholder="e.g. Ohio State -6.5" required />

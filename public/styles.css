@@ -395,6 +395,35 @@ dialog input, dialog textarea, dialog select {
 }
 .form-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.adhoc-bet-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.adhoc-bet-form label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+.adhoc-bet-form label.grow { flex: 1 1 220px; }
+.adhoc-bet-form input, .adhoc-bet-form select {
+  display: block;
+  margin-top: 4px;
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  width: 100%;
+}
+.adhoc-bet-form .form-actions { margin-top: 0; }
 .btn-primary {
   background: var(--turf);
   color: #0d0f13;

@@ -113,7 +113,13 @@ exports.handler = async (event) => {
 
     const allBetIds = await redis.smembers("bets:all");
     const allBets = allBetIds.length ? (await redis.mget(...allBetIds.map((id) => `bet:${id}`))).filter(Boolean) : [];
-    const bets = week ? allBets.filter((b) => gameIds.includes(b.gameId)) : allBets;
+    // A bet belongs to this week's view if it's tied to one of this week's
+    // games, OR it's an ad hoc/standalone bet (no gameId) that was tagged
+    // with this week directly. Ad hoc bets with no week at all only show up
+    // in the "all weeks" view.
+    const bets = week
+      ? allBets.filter((b) => (b.gameId ? gameIds.includes(b.gameId) : String(b.week) === String(week)))
+      : allBets;
 
     const lineMovement = [];
     const valueComparison = [];

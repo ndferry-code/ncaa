@@ -4,7 +4,13 @@
 // ----------
 // game:{gameId}                      -> JSON: { gameId, week, kickoff, away, home, apRankAway, apRankHome, notable }
 // week:{week}:games                  -> SET of gameId
-// bet:{gameId}                       -> JSON: { gameId, side, spread, odds, stake, placedAt, result, notes }
+// bet:{id}                           -> JSON: { id, gameId?, week?, betType, label, odds, stake, placedAt, spread?, result, notes }
+//                                        gameId and week are OPTIONAL -- ad hoc/prop/parlay bets can be logged with
+//                                        neither. A single game can have more than one bet (spread AND a total, say),
+//                                        since bets are keyed by their own id, not by gameId.
+// bets:all                           -> SET of bet id (every bet, regardless of type or whether it's tied to a game)
+// week:{week}:bets                   -> SET of bet id (only bets that were given a week)
+// game:{gameId}:bets                 -> SET of bet id (only bets that were given a gameId)
 // lines:hardrock:{gameId}:latest     -> JSON: { spread, odds, ts }
 // lines:hardrock:{gameId}:history    -> LIST of JSON snapshots, oldest first (RPUSH)
 // lines:reference:{gameId}:latest    -> JSON: { book, spread, odds, ts }  (best-of-market comparison line)

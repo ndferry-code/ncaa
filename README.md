@@ -86,10 +86,13 @@ In your repo's Settings → Secrets and variables → Actions:
 
 Two workflow files:
 - `.github/workflows/update-lines.yml` — fetches lines every 3 hours
-  Mon–Sat, reseeds the week's Top 25 games every Monday. The current week
-  is auto-detected from actual game kickoff times — nothing to update by
-  hand. Adjust the cron schedules to match how often you actually want
-  snapshots — more often near kickoff if you want tighter CLV tracking.
+  Mon–Sat, settles finished bets and reseeds the week's Top 25 games every
+  Sunday afternoon (settling at 1pm ET, reseeding at 3pm ET — timed after
+  the AP poll actually releases around 2pm ET, with a buffer for its
+  occasional 15-30 min delay). The current week is auto-detected from
+  actual game kickoff times — nothing to update by hand. Adjust the cron
+  schedules to match how often you actually want snapshots — more often
+  near kickoff if you want tighter CLV tracking.
 - `.github/workflows/expert-picks.yml` — pulls expert picks/news every
   Wednesday. Kept as its own workflow (rather than a job in the one above)
   specifically so the site's "Refresh Now" button (next section) can
@@ -194,10 +197,32 @@ Open your Netlify URL. Pick the week, click "Log bet" on any game to record
 your side/spread/odds/stake. The dashboard fills in line movement, Hard
 Rock-vs-market value, and your record/CLV/trends as data comes in.
 
-To settle a bet after a game, `POST` to `/api/bets` with the same `gameId`
-and add `result: "win" | "loss" | "push"` and `closingLine` — worth wiring a
-tiny settle form into the UI later if logging results by hand gets old; the
-API already supports it.
+For anything that isn't a spread bet on a tracked Top 25 game — an
+over/under, a moneyline, a prop, a parlay, or any other ad hoc wager — use
+the **"Log a Bet"** section above the schedule instead. It's a plain form:
+description, type, odds, wager, result. Since these are usually logged after
+the fact, just pick the result (Win/Loss/Push) right there instead of
+leaving it Pending. That same table also lists and lets you edit/delete
+*every* bet in the system, including the ones logged from the schedule.
+
+Bets settle automatically — `settle_bets.py` runs Sunday afternoon (once at
+1pm ET, then again at 3pm ET alongside the reseed as a catch-all) and
+grades every pending **spread** bet tied to a tracked game against CFBD's
+final score once that game is complete, filling in `result` and
+`closingLine` for you. It only touches spread bets on tracked games —
+anything logged through "Log a Bet" (totals, props, ad hoc wagers) already
+has its result set when you log it, and is never auto-touched. You can
+still settle a spread bet manually from the site any time (click an
+already-logged bet, pick a result) — automatic settlement just fills in
+whatever manual settling didn't already cover; it never overwrites a result
+you already set yourself.
+
+**Bet data model note:** bets are keyed by their own id now, not by game —
+so a game can carry a spread bet *and* a total, and ad hoc bets don't need
+a game at all. If you're looking at raw API responses, `bet:{gameId}` from
+earlier versions of this README is stale; the current shape is `bet:{id}`
+with an optional `gameId`/`week` (see the schema comment atop
+`netlify/functions/_redis.js`).
 
 ## Experts & News tab — how it actually works, and its limits
 
@@ -238,10 +263,14 @@ of `scripts/fetch_expert_content.py`.
   natural next additions are by-conference and by-rank-tier splits — the
   `computeRecord()` function in `netlify/functions/dashboard.js` is the
   place to extend.
-- **CLV requires a closing line.** Right now that means noting the last
-  Hard Rock snapshot before kickoff and setting it as `closingLine` when you
-  settle a bet — could automate by having the update script flag the last
-  pre-kickoff snapshot per game.
+- **CLV closing line is filled in automatically now** by `settle_bets.py` —
+  it uses the last Hard Rock snapshot on file for that game at settlement
+  time. That's usually close to the true closing number but not exactly
+  it, since line updates stop once a game kicks off and Odds API stops
+  returning it, not necessarily at the literal closing second. Good enough
+  for trend purposes; if you want it more precise, set `closingLine`
+  yourself when manually settling a bet, which auto-settlement will never
+  overwrite.
 - **Redis history is capped at 200 snapshots/game** to keep storage in
   check — plenty for a single game week at a few-hour cadence.
 - **If Hard Rock ever disappears from The Odds API response** (bookmakers do

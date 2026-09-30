@@ -71,7 +71,17 @@ def main():
 
     bets_resp = requests.get(f"{app_url}/api/bets", timeout=30)
     check_response(bets_resp)
-    pending = [b for b in bets_resp.json().get("bets", []) if not b.get("result")]
+    # Only auto-settle spread bets tied to a tracked game -- this script
+    # grades against the final score using the spread you took, which is
+    # meaningless for a total, moneyline, or ad hoc/prop bet (those get their
+    # result set by hand when you log them via the "Log a Bet" section, or
+    # settled manually later). Bets logged before betType existed have no
+    # betType at all and are treated as legacy spread bets.
+    pending = [
+        b
+        for b in bets_resp.json().get("bets", [])
+        if not b.get("result") and b.get("gameId") and b.get("betType", "spread") == "spread"
+    ]
     if not pending:
         print("No pending bets to settle.")
         sys.exit(0)
@@ -124,7 +134,7 @@ def main():
 
         resp = requests.post(
             f"{app_url}/api/bets",
-            json={"gameId": bet["gameId"], "result": result, "closingLine": closing_line},
+            json={"id": bet["id"], "result": result, "closingLine": closing_line},
             headers={"x-ingest-token": ingest_token, "Content-Type": "application/json"},
             timeout=30,
         )

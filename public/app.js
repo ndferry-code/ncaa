@@ -151,6 +151,7 @@ async function loadDashboard() {
   renderMovementTable();
   renderWeeklyResults();
   renderInsights();
+  renderAllBetsTable();
 }
 
 function renderBreakevenHero() {
@@ -274,7 +275,11 @@ function renderGamesTable() {
   body.innerHTML = state.games
     .sort((a, b) => new Date(a.kickoff) - new Date(b.kickoff))
     .map((g) => {
-      const bet = state.bets.find((b) => b.gameId === g.gameId);
+      // A game can carry more than one bet now (a spread bet AND a total,
+      // say) -- this column specifically tracks the spread side, which is
+      // what the quick-pick buttons in the dialog log. Bets with no betType
+      // are legacy spread bets from before this field existed.
+      const bet = state.bets.find((b) => b.gameId === g.gameId && (b.betType === "spread" || !b.betType));
       const vc = state.valueComparison.find((v) => v.gameId === g.gameId);
       const lm = state.lineMovement.find((m) => m.gameId === g.gameId);
       const kickoff = g.kickoff
@@ -423,10 +428,11 @@ function openBetDialog(gameId) {
   const g = state.games.find((x) => x.gameId === gameId);
   const lm = state.lineMovement.find((m) => m.gameId === gameId);
   const hrCurrent = lm ? lm.hardrock.current : null; // this is always the HOME team's spread
-  const existing = state.bets.find((b) => b.gameId === gameId);
+  const existing = state.bets.find((b) => b.gameId === gameId && (b.betType === "spread" || !b.betType));
 
   document.getElementById("betDialogTitle").textContent = existing ? "Edit Bet" : "Log Bet";
   document.getElementById("betGameId").value = gameId;
+  document.getElementById("betId").value = existing ? existing.id : "";
   document.getElementById("betSide").value = existing ? existing.side : "";
   document.getElementById("betSpread").value = existing ? existing.spread : "";
   document.getElementById("betOdds").value = existing ? existing.odds : -110;
@@ -473,21 +479,24 @@ document.getElementById("betCancel").addEventListener("click", () => {
 });
 
 document.getElementById("betDelete").addEventListener("click", async () => {
-  const gameId = document.getElementById("betGameId").value;
+  const id = document.getElementById("betId").value;
   if (!confirm("Delete this bet? This can't be undone.")) return;
-  await fetch(`${API}/bets?gameId=${encodeURIComponent(gameId)}`, { method: "DELETE", headers: AUTH_HEADERS });
+  await fetch(`${API}/bets?id=${encodeURIComponent(id)}`, { method: "DELETE", headers: AUTH_HEADERS });
   document.getElementById("betDialog").close();
   await loadDashboard();
 });
 
 document.getElementById("betForm").addEventListener("submit", async (e) => {
   const gameId = document.getElementById("betGameId").value;
+  const id = document.getElementById("betId").value || undefined;
   const g = state.games.find((x) => x.gameId === gameId);
-  const existing = state.bets.find((b) => b.gameId === gameId);
+  const existing = id ? state.bets.find((b) => b.id === id) : null;
   const resultVal = document.getElementById("betResult").value;
   const closingLineVal = document.getElementById("betClosingLine").value;
   const bet = {
+    id,
     gameId,
+    betType: "spread",
     week: g ? g.week : state.week,
     side: document.getElementById("betSide").value,
     spread: parseFloat(document.getElementById("betSpread").value),
@@ -504,6 +513,97 @@ document.getElementById("betForm").addEventListener("submit", async (e) => {
     result: resultVal || null,
   };
   await fetch(`${API}/bets`, { method: "POST", headers: AUTH_HEADERS, body: JSON.stringify(bet) });
+  await loadDashboard();
+});
+
+// --- Log a Bet (ad hoc / over-under / anything not tied to the schedule
+// above) -- a simple inline form: description, odds, wager, result. Also
+// doubles as the editor for every bet in the system (including the
+// per-game spread bets above), since it's just working off bet ids.
+
+function fmtBetDate(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function resetAdhocForm() {
+  document.getElementById("adhocBetId").value = "";
+  document.getElementById("adhocLabel").value = "";
+  document.getElementById("adhocType").value = "spread";
+  document.getElementById("adhocOdds").value = -110;
+  document.getElementById("adhocStake").value = 100;
+  document.getElementById("adhocResult").value = "";
+  document.getElementById("adhocSave").textContent = "Add Bet";
+  document.getElementById("adhocCancel").style.display = "none";
+}
+
+function openAdhocEdit(id) {
+  const b = state.bets.find((x) => x.id === id);
+  if (!b) return;
+  document.getElementById("adhocBetId").value = b.id;
+  document.getElementById("adhocLabel").value = b.label || b.side || "";
+  document.getElementById("adhocType").value = b.betType || "spread";
+  document.getElementById("adhocOdds").value = b.odds != null ? b.odds : -110;
+  document.getElementById("adhocStake").value = b.stake != null ? b.stake : 100;
+  document.getElementById("adhocResult").value = b.result || "";
+  document.getElementById("adhocSave").textContent = "Update Bet";
+  document.getElementById("adhocCancel").style.display = "";
+  document.getElementById("adhocLabel").scrollIntoView({ behavior: "smooth", block: "center" });
+  document.getElementById("adhocLabel").focus();
+}
+
+function renderAllBetsTable() {
+  const body = document.getElementById("allBetsBody");
+  const rows = [...state.bets].sort((a, b) => new Date(b.placedAt) - new Date(a.placedAt));
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="7" class="mono" style="color:var(--muted)">No bets logged yet.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows
+    .map((b) => {
+      const desc = b.label || b.side || "—";
+      const type = (b.betType || "spread").replace("_", " ");
+      const resultHtml = b.result
+        ? `<span class="pill ${b.result}">${b.result.toUpperCase()}</span>`
+        : `<span class="pill pending">PENDING</span>`;
+      return `<tr>
+        <td class="mono">${fmtBetDate(b.placedAt)}</td>
+        <td>${desc}</td>
+        <td class="mono">${type}</td>
+        <td class="mono">${b.odds != null ? b.odds : "—"}</td>
+        <td class="mono">${b.stake != null ? b.stake : "—"}</td>
+        <td>${resultHtml}</td>
+        <td><button type="button" class="btn-ghost btn-edit-bet" data-id="${b.id}">Edit</button></td>
+      </tr>`;
+    })
+    .join("");
+  body.querySelectorAll(".btn-edit-bet").forEach((btn) => {
+    btn.addEventListener("click", () => openAdhocEdit(btn.dataset.id));
+  });
+}
+
+document.getElementById("adhocCancel").addEventListener("click", resetAdhocForm);
+
+document.getElementById("adhocBetForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = document.getElementById("adhocBetId").value || undefined;
+  const existing = id ? state.bets.find((b) => b.id === id) : null;
+  const bet = {
+    id,
+    // Editing a bet that came from the per-game dialog (has a gameId/betType
+    // already) keeps that link -- this form only ever changes the fields it
+    // actually shows.
+    ...(existing ? { gameId: existing.gameId } : {}),
+    label: document.getElementById("adhocLabel").value,
+    betType: document.getElementById("adhocType").value,
+    odds: parseInt(document.getElementById("adhocOdds").value, 10),
+    stake: parseFloat(document.getElementById("adhocStake").value),
+    result: document.getElementById("adhocResult").value || null,
+    placedAt: existing ? existing.placedAt : new Date().toISOString(),
+    week: existing ? existing.week : state.week,
+  };
+  await fetch(`${API}/bets`, { method: "POST", headers: AUTH_HEADERS, body: JSON.stringify(bet) });
+  resetAdhocForm();
   await loadDashboard();
 });
 
